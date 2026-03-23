@@ -1,0 +1,765 @@
+﻿/**
+ * 定时消息插件样式
+ */
+
+/* ========== 输入区域按钮 ========== */
+.chat-session-inputarea-othertypes-schedule {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    background: var(--bg-secondary, #f1f5f9);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 6px;
+    color: var(--text-color, #475569);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.chat-session-inputarea-othertypes-schedule:hover {
+    background: var(--bg-hover, #e2e8f0);
+    border-color: var(--primary-color, #3b82f6);
+    color: var(--primary-color, #3b82f6);
+}
+
+.chat-session-inputarea-othertypes-schedule i {
+    font-size: 14px;
+}
+
+/* 暗色主题 */
+.theme-dark .chat-session-inputarea-othertypes-schedule {
+    background: var(--bg-secondary, #1e293b);
+    border-color: var(--border-color, #334155);
+    color: var(--text-color, #94a3b8);
+}
+
+.theme-dark .chat-session-inputarea-othertypes-schedule:hover {
+    background: var(--bg-hover, #334155);
+    border-color: var(--primary-color, #60a5fa);
+    color: var(--primary-color, #60a5fa);
+}
+
+/* ========== 弹窗通用样式 ========== */
+.plugin-modal-overlay.plugin-scheduled-message {
+    z-index: 10001;
+}
+
+.plugin-modal.plugin-scheduled-message {
+    background: var(--bg-color, #ffffff);
+}
+
+.theme-dark .plugin-modal.plugin-scheduled-message {
+    background: var(--bg-color, #1e293b);
+}
+
+/* ========== 创建/编辑弹窗 ========== */
+.scheduled-message-modal {
+    padding: 8px 0;
+}
+
+.sm-form-group {
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+}
+
+.sm-form-group:last-child {
+    margin-bottom: 0;
+}
+
+/* 第一行：联系人名称 + 消息内容 */
+.sm-form-group:first-child {
+    flex-wrap: wrap;
+    align-items: flex-start;
+}
+
+.sm-form-group:first-child .sm-contact-info {
+    width: 100%;
+    // flex-shrink: 0;
+    margin-bottom: 8px;
+}
+
+.sm-form-group:first-child .sm-textarea {
+    width: 100%;
+    flex: none;
+}
+
+.sm-label {
+    flex-shrink: 0;
+    width: 80px;
+    margin-bottom: 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-color, #374151);
+}
+
+.theme-dark .sm-label {
+    color: var(--text-color, #e5e7eb);
+}
+
+.sm-required {
+    color: #ef4444;
+}
+
+/* 联系人信息 */
+.sm-contact-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 10px;
+    background: var(--bg-secondary, #f1f5f9);
+    border-radius: 6px;
+    font-size: 14px;
+    color: var(--text-color, #374151);
+}
+
+.theme-dark .sm-contact-info {
+    background: var(--bg-secondary, #334155);
+    color: var(--text-color, #e5e7eb);
+}
+
+.sm-contact-info i {
+    font-size: 16px;
+    color: var(--primary-color, #3b82f6);
+}
+
+.sm-input,
+.sm-select,
+.sm-textarea {
+    flex: 1;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color, #d1d5db);
+    border-radius: 6px;
+    font-size: 14px;
+    color: var(--text-color, #374151);
+    background: var(--bg-color, #ffffff);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
+}
+
+/* 消息内容输入框 */
+.sm-textarea {
+    min-height: 150px;
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.sm-select {
+    cursor: pointer;
+}
+
+.sm-input:focus,
+.sm-select:focus,
+.sm-textarea:focus {
+    outline: none;
+    border-color: var(--primary-color, #3b82f6);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.theme-dark .sm-input,
+.theme-dark .sm-select,
+.theme-dark .sm-textarea {
+    background: var(--bg-secondary, #0f172a);
+    border-color: var(--border-color, #334155);
+    color: var(--text-color, #e5e7eb);
+}
+
+.theme-dark .sm-input:focus,
+.theme-dark .sm-select:focus,
+.theme-dark .sm-textarea:focus {
+    border-color: var(--primary-color, #60a5fa);
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+}
+
+.sm-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-secondary, #6b7280);
+}
+
+.theme-dark .sm-hint {
+    color: var(--text-secondary, #9ca3af);
+}
+
+.sm-contact-type {
+    font-size: 12px;
+    color: var(--text-secondary, #6b7280);
+}
+
+/* ========== 按钮样式 ========== */
+.sm-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    // margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color, #e5e7f0);
+}
+
+.theme-dark .sm-actions {
+    border-top-color: var(--border-color, #334155);
+}
+
+.sm-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.sm-btn-primary {
+    background: var(--primary-color, #3b82f6);
+    color: #ffffff;
+}
+
+.sm-btn-primary:hover {
+    background: var(--primary-hover, #2563eb);
+}
+
+.sm-btn-secondary {
+    background: var(--bg-secondary, #f1f5f9);
+    color: var(--text-color, #374151);
+    border: 1px solid var(--border-color, #d1d5db);
+}
+
+.sm-btn-secondary:hover {
+    background: var(--bg-hover, #e5e7eb);
+}
+
+.theme-dark .sm-btn-primary {
+    background: var(--primary-color, #3b82f6);
+}
+
+.theme-dark .sm-btn-primary:hover {
+    background: var(--primary-hover, #2563eb);
+}
+
+.theme-dark .sm-btn-secondary {
+    background: var(--bg-secondary, #334155);
+    color: var(--text-color, #e5e7eb);
+    border-color: var(--border-color, #475569);
+}
+
+.theme-dark .sm-btn-secondary:hover {
+    background: var(--bg-hover, #475569);
+}
+
+/* ========== 列表弹窗 ========== */
+.scheduled-message-list-modal {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.sm-list-content {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.sm-list-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sm-list-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sm-list-content::-webkit-scrollbar-thumb {
+    background: var(--border-color, #cbd5e1);
+    border-radius: 3px;
+}
+
+.theme-dark .sm-list-content::-webkit-scrollbar-thumb {
+    background: var(--border-color, #475569);
+}
+
+/* 空状态 */
+.sm-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: var(--text-secondary, #9ca3af);
+}
+
+.sm-empty i {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.sm-empty p {
+    margin: 0;
+    font-size: 14px;
+}
+
+/* 分区 */
+.sm-section {
+    margin-bottom: 20px;
+}
+
+.sm-section:last-child {
+    margin-bottom: 0;
+}
+
+.sm-section-title {
+    margin: 0 0 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary, #6b7280);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.theme-dark .sm-section-title {
+    border-bottom-color: var(--border-color, #334155);
+    color: var(--text-secondary, #9ca3af);
+}
+
+/* 消息列表 */
+.sm-message-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* 消息项 */
+.sm-message-item {
+    padding: 8px;
+    background: var(--bg-secondary, #f8fafc);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 8px;
+    transition: box-shadow 0.2s;
+}
+
+.sm-message-item:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.theme-dark .sm-message-item {
+    background: var(--bg-secondary, #1e293b);
+    border-color: var(--border-color, #334155);
+}
+
+.theme-dark .sm-message-item:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* 已发送的消息 */
+.sm-message-item.sm-sent {
+    opacity: 0.7;
+}
+
+.sm-message-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.sm-message-contact {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-color, #374151);
+}
+
+.theme-dark .sm-message-contact {
+    color: var(--text-color, #e5e7eb);
+}
+
+.sm-message-contact i {
+    color: var(--primary-color, #3b82f6);
+}
+
+.sm-message-time {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary, #6b7280);
+}
+
+.theme-dark .sm-message-time {
+    color: var(--text-secondary, #9ca3af);
+}
+
+.sm-repeat-badge {
+    padding: 2px 6px;
+    background: var(--primary-light, #dbeafe);
+    color: var(--primary-color, #2563eb);
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.theme-dark .sm-repeat-badge {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+}
+
+.sm-message-content {
+    flex: 1;
+    font-size: 14px;
+    line-height: 2.5;
+    color: var(--text-color, #374151);
+    word-break: break-word;
+    white-space: pre-wrap;
+    max-height: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 0 0 2px;
+}
+
+.theme-dark .sm-message-content {
+    color: var(--text-color, #e5e7eb);
+}
+
+.sm-message-item {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.sm-message-header {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0;
+}
+
+.sm-message-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.sm-message-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
+.theme-dark .sm-message-actions {
+    border-top-color: var(--border-color, #334155);
+}
+
+.sm-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary, #6b7280);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.sm-action-btn:hover {
+    background: var(--bg-hover, #e5e7eb);
+    color: var(--text-color, #374151);
+}
+
+.sm-action-btn.sm-edit:hover {
+    color: var(--primary-color, #3b82f6);
+}
+
+.sm-action-btn.sm-cancel:hover {
+    color: #ef4444;
+}
+
+.sm-action-btn.sm-delete:hover {
+    color: #ef4444;
+}
+
+.theme-dark .sm-action-btn {
+    color: var(--text-secondary, #9ca3af);
+}
+
+.theme-dark .sm-action-btn:hover {
+    background: var(--bg-hover, #334155);
+    color: var(--text-color, #e5e7eb);
+}
+
+.theme-dark .sm-action-btn.sm-edit:hover {
+    color: #60a5fa;
+}
+
+.theme-dark .sm-action-btn.sm-cancel:hover {
+    color: #f87171;
+}
+
+.theme-dark .sm-action-btn.sm-delete:hover {
+    color: #f87171;
+}
+
+.sm-sent-badge {
+    padding: 4px 10px;
+    background: var(--success-light, #dcfce7);
+    color: var(--success-color, #16a34a);
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.theme-dark .sm-sent-badge {
+    background: rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+}
+
+/* ========== 确认弹窗 ========== */
+.sm-confirm-dialog {
+    text-align: center;
+    // padding: 16px 0;
+}
+
+.sm-confirm-icon {
+    margin-bottom: 8px;
+}
+
+.sm-confirm-icon i {
+    font-size: 48px;
+    color: #f59e0b;
+}
+
+.sm-confirm-icon i.bi-trash {
+    color: #ef4444;
+}
+
+.theme-dark .sm-confirm-icon i {
+    color: #fbbf24;
+}
+
+.theme-dark .sm-confirm-icon i.bi-trash {
+    color: #f87171;
+}
+
+.sm-confirm-text {
+    font-size: 15px;
+    color: var(--text-color, #374151);
+    margin-bottom: 15px;
+}
+
+.theme-dark .sm-confirm-text {
+    color: var(--text-color, #e5e7eb);
+}
+
+.sm-confirm-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+}
+
+.sm-btn-danger {
+    background: #ef4444;
+    color: #ffffff;
+}
+
+.sm-btn-danger:hover {
+    background: #dc2626;
+}
+
+.theme-dark .sm-btn-danger {
+    background: #ef4444;
+}
+
+.theme-dark .sm-btn-danger:hover {
+    background: #dc2626;
+}
+
+/* ========== 配置设置弹窗 ========== */
+.scheduled-message-settings {
+    padding: 4px 0;
+}
+
+.sm-settings-group {
+    margin-bottom: 16px;
+}
+
+.sm-settings-group:last-child {
+    margin-bottom: 0;
+}
+
+.sm-settings-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-color, #374151);
+}
+
+.theme-dark .sm-settings-header {
+    color: var(--text-color, #e5e7eb);
+}
+
+.sm-settings-header i {
+    color: var(--primary-color, #3b82f6);
+}
+
+.sm-settings-desc {
+    margin: 0 0 16px 0;
+    font-size: 13px;
+    color: var(--text-secondary, #6b7280);
+    line-height: 1.5;
+}
+
+.theme-dark .sm-settings-desc {
+    color: var(--text-secondary, #9ca3af);
+}
+
+.sm-settings-item {
+    margin-bottom: 12px;
+}
+
+.sm-settings-item:last-child {
+    margin-bottom: 0;
+}
+
+.sm-settings-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--text-color, #374151);
+    cursor: pointer;
+}
+
+.theme-dark .sm-settings-label {
+    color: var(--text-color, #e5e7eb);
+}
+
+.sm-settings-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--primary-color, #3b82f6);
+}
+
+.sm-settings-row {
+    margin-top: 16px;
+    padding: 16px;
+    background: var(--bg-secondary, #f8fafc);
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #e2e8f0);
+    transition: opacity 0.2s;
+}
+
+.theme-dark .sm-settings-row {
+    background: var(--bg-secondary, #1e293b);
+    border-color: var(--border-color, #334155);
+}
+
+.sm-settings-row.sm-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.sm-settings-input-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.sm-input-number {
+    width: 80px;
+    text-align: center;
+}
+
+.sm-input-suffix {
+    font-size: 14px;
+    color: var(--text-secondary, #6b7280);
+}
+
+.theme-dark .sm-input-suffix {
+    color: var(--text-secondary, #9ca3af);
+}
+
+.sm-settings-hint {
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-secondary, #9ca3af);
+}
+
+.theme-dark .sm-settings-hint {
+    color: var(--text-secondary, #9ca3af);
+}
+
+.sm-settings-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color, #e5e7f0);
+}
+
+.theme-dark .sm-settings-actions {
+    border-top-color: var(--border-color, #334155);
+}
+
+/* 列表底部操作区域调整 */
+.sm-list-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--border-color, #e5e7f0);
+}
+
+.sm-list-actions-left {
+    display: flex;
+    gap: 8px;
+}
+
+.theme-dark .sm-list-actions {
+    border-top-color: var(--border-color, #334155);
+}
+
+/* ========== 响应式调整 ========== */
+@media (max-width: 480px) {
+    .sm-message-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+    
+    .sm-message-time {
+        align-self: flex-start;
+    }
+    
+    .sm-actions {
+        flex-direction: column;
+    }
+    
+    .sm-btn {
+        width: 100%;
+    }
+}
