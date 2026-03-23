@@ -1,0 +1,355 @@
+/* 快捷面板插件样式 */
+
+/* 主按钮 */
+.quick-panel {
+    position: fixed;
+    z-index: 9999;
+}
+
+.quick-panel.bottom-right {
+    bottom: 80px;
+    right: 20px;
+}
+
+.quick-panel.bottom-left {
+    bottom: 80px;
+    left: 20px;
+}
+
+.quick-panel-main-btn {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--qp-primary, #3b82f6) 0%, #1d4ed8 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+    transition: all 0.3s ease;
+    font-size: 20px;
+}
+
+.quick-panel-main-btn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
+}
+
+.quick-panel-main-btn.active {
+    transform: rotate(45deg);
+    box-shadow: 0 6px 20px rgba(59, 130, 246, 0.6);
+}
+
+/* 菜单面板 */
+.quick-panel-menu {
+    position: absolute;
+    bottom: 60px;
+    right: 0;
+    width: 240px;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    animation: quickPanelSlideUp 0.3s ease;
+}
+
+.quick-panel.bottom-left .quick-panel-menu {
+    right: auto;
+    left: 0;
+}
+
+.quick-panel-menu.hidden {
+    display: none;
+}
+
+@keyframes quickPanelSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 头部 */
+.quick-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, var(--qp-primary, #3b82f6) 0%, #1d4ed8 100%);
+    color: white;
+}
+
+.quick-panel-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.quick-panel-settings-btn {
+    background: transparent;
+    border: none;
+    color: white;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.quick-panel-settings-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* 时钟区域 */
+.quick-panel-clock {
+    padding: 16px;
+    text-align: center;
+    border-bottom: 1px solid #f0f0f0;
+    background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+}
+
+.quick-panel-time {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--qp-primary, #3b82f6);
+    font-family: 'SF Mono', 'Consolas', monospace;
+    letter-spacing: 2px;
+}
+
+.quick-panel-date {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 4px;
+}
+
+/* 操作按钮区域 */
+.quick-panel-actions {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.quick-panel-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: #475569;
+    font-size: 13px;
+    text-align: left;
+}
+
+.quick-panel-action-btn:hover {
+    background: linear-gradient(135deg, var(--qp-primary, #3b82f6) 0%, #1d4ed8 100%);
+    color: white;
+    transform: translateX(4px);
+}
+
+.quick-panel-action-btn i {
+    font-size: 16px;
+    width: 20px;
+    text-align: center;
+}
+
+/* 设置弹窗 */
+.quick-panel-settings-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: quickPanelFadeIn 0.2s ease;
+}
+
+@keyframes quickPanelFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.quick-panel-settings-dialog {
+    background: white;
+    border-radius: 16px;
+    width: 320px;
+    max-width: 90vw;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+    animation: quickPanelZoomIn 0.3s ease;
+}
+
+@keyframes quickPanelZoomIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.quick-panel-settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, var(--qp-primary, #3b82f6) 0%, #1d4ed8 100%);
+    color: white;
+}
+
+.quick-panel-settings-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.quick-panel-settings-close {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+}
+
+.quick-panel-settings-close:hover {
+    opacity: 1;
+}
+
+.quick-panel-settings-body {
+    padding: 20px;
+}
+
+.quick-panel-setting-item {
+    margin-bottom: 16px;
+}
+
+.quick-panel-setting-item:last-child {
+    margin-bottom: 0;
+}
+
+.quick-panel-setting-item label {
+    display: block;
+    font-size: 13px;
+    color: #475569;
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.quick-panel-color-input {
+    width: 100%;
+    height: 40px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.quick-panel-select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #475569;
+    cursor: pointer;
+    background: white;
+}
+
+.quick-panel-select:focus {
+    outline: none;
+    border-color: var(--qp-primary, #3b82f6);
+}
+
+.quick-panel-checkbox {
+    margin-right: 8px;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.quick-panel-settings-footer {
+    padding: 16px 20px;
+    border-top: 1px solid #f0f0f0;
+    text-align: right;
+}
+
+.quick-panel-save-btn {
+    padding: 10px 24px;
+    background: linear-gradient(135deg, var(--qp-primary, #3b82f6) 0%, #1d4ed8 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.quick-panel-save-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+/* 暗色主题适配 */
+.theme-dark .quick-panel-menu {
+    background: #1e293b;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+}
+
+.theme-dark .quick-panel-clock {
+    background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+    border-bottom-color: #334155;
+}
+
+.theme-dark .quick-panel-date {
+    color: #94a3b8;
+}
+
+.theme-dark .quick-panel-action-btn {
+    color: #cbd5e0;
+}
+
+.theme-dark .quick-panel-action-btn:hover {
+    background: linear-gradient(135deg, var(--qp-primary, #3b82f6) 0%, #1d4ed8 100%);
+    color: white;
+}
+
+.theme-dark .quick-panel-settings-dialog {
+    background: #1e293b;
+}
+
+.theme-dark .quick-panel-settings-body label {
+    color: #cbd5e0;
+}
+
+.theme-dark .quick-panel-select {
+    background: #0f172a;
+    border-color: #334155;
+    color: #e2e8f0;
+}
+
+.theme-dark .quick-panel-settings-footer {
+    border-top-color: #334155;
+}
+
+.theme-dark .quick-panel-color-input {
+    background: #0f172a;
+    border-color: #334155;
+}

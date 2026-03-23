@@ -1,0 +1,12 @@
+{
+  "id": "quick-panel",
+  "name": "快捷面板",
+  "version": "1.0.0",
+  "description": "在页面右下角添加一个悬浮快捷操作面板，包含回到顶部、主题切换、实时时钟等功能。支持自定义颜色和位置。",
+  "author": "CC 团队",
+  "entry": "main.js",
+  "styles": "styles.css",
+  "permissions": ["ui", "storage"],
+  "compatibility": ">=4.0.0",
+  "homepage": "https://github.com/yourname/cc-plugins/tree/main/plugins/quick-panel"
+}
