@@ -8,6 +8,5 @@
   "styles": "styles.css",
   "permissions": ["ui", "storage"],
   "compatibility": ">=4.0.0",
-  "homepage": "https://github.com/yourname/cc-plugins/tree/main/plugins/quick-panel",
-  "admin_only": true
+  "homepage": "https://github.com/yourname/cc-plugins/tree/main/plugins/quick-panel"
 }
