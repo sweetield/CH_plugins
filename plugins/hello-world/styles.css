@@ -1,0 +1,77 @@
+/* Hello World 管理员插件样式 */
+
+#hello-world-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 99999;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 10px 20px;
+    box-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
+    animation: helloSlideDown 0.5s ease;
+}
+
+@keyframes helloSlideDown {
+    from {
+        transform: translateY(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes helloSlideUp {
+    from {
+        transform: translateY(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateY(-100%);
+        opacity: 0;
+    }
+}
+
+.hello-banner-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.hello-banner-icon {
+    font-size: 20px;
+}
+
+.hello-banner-text {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.hello-banner-close {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    transition: background 0.2s;
+}
+
+.hello-banner-close:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* 暗色主题适配 */
+.theme-dark #hello-world-banner {
+    background: linear-gradient(135deg, #4c51bf 0%, #553c9a 100%);
+    box-shadow: 0 2px 10px rgba(76, 81, 191, 0.4);
+}

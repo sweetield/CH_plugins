@@ -1,0 +1,12 @@
+{
+  "id": "hello-world",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "description": "【管理员专用】一个简单的测试插件，在页面顶部显示欢迎横幅。",
+  "author": "CC 团队",
+  "entry": "main.js",
+  "styles": "styles.css",
+  "permissions": ["ui", "storage"],
+  "compatibility": ">=4.0.0",
+  "admin_only": true
+}
