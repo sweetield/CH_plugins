@@ -1,5 +1,5 @@
 {
-  "base_url": "https://github.com/sweetield/CH_plugins/raw/refs/heads/main/plugins/",
+  "base_url": "https://raw.githubusercontent.com/sweetield/CH_plugins/main/plugins/",
   "plugins": [
     {
       "id": "hello-world",
