@@ -1,0 +1,29 @@
+{
+  "base_url": "https://raw.githubusercontent.com/JDUHDY/CK/refs/heads/main/plugins/",
+  "plugins": [
+    {
+      "id": "hello-world",
+      "name": "Hello World",
+      "version": "1.0.0",
+      "description": "【管理员专用】一个简单的测试插件，在页面顶部显示欢迎横幅。",
+      "author": "CC 团队",
+      "manifest_url": "./hello-world/manifest.json"
+    },
+    {
+      "id": "quick-panel",
+      "name": "快捷面板",
+      "version": "1.0.0",
+      "description": "在页面右下角添加一个悬浮快捷操作面板，包含回到顶部、主题切换、实时时钟等功能",
+      "author": "CC 团队",
+      "manifest_url": "./quick-panel/manifest.json"
+    },
+    {
+      "id": "scheduled-message",
+      "name": "定时消息",
+      "version": "1.0.0",
+      "description": "支持定时发送消息，可设置一次性发送或周期重复（每日/每周/每月）。到时间自动发送，支持编辑和取消。",
+      "author": "CC 团队",
+      "manifest_url": "./scheduled-message/manifest.json"
+    }
+  ]
+}
