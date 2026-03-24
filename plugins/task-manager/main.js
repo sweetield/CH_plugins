@@ -109,115 +109,14 @@ class TaskManagerPlugin {
     }
 
     injectStyles() {
-        const css = `
-            .tm-panel {
-                position: fixed;
-                top: 0;
-                right: 0;
-                width: 100%;
-                max-width: 1200px;
-                height: 100vh;
-                background: var(--tm-bg, #ffffff);
-                z-index: 10000;
-                display: flex;
-                transform: translateX(100%);
-                transition: transform 0.3s ease;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            }
-            
-            .tm-panel.open {
-                transform: translateX(0);
-            }
-            
-            .tm-panel * {
-                box-sizing: border-box;
-            }
-            
-            .theme-dark .tm-panel {
-                --tm-bg: #1e293b;
-                --tm-bg-secondary: #334155;
-                --tm-text: #f1f5f9;
-                --tm-text-secondary: #94a3b8;
-                --tm-border: #334155;
-            }
-            
-            .tm-panel:not(.theme-dark) {
-                --tm-bg: #ffffff;
-                --tm-bg-secondary: #f8fafc;
-                --tm-text: #1e293b;
-                --tm-text-secondary: #64748b;
-                --tm-border: #e2e8f0;
-            }
-            
-            .tm-sidebar {
-                width: 180px;
-                min-width: 180px;
-                background: var(--tm-bg-secondary);
-                border-right: 1px solid var(--tm-border);
-                overflow-y: auto;
-                padding: 12px 0;
-            }
-            
-            .tm-sidebar-section {
-                margin-bottom: 8px;
-            }
-            
-            .tm-sidebar-title {
-                font-size: 11px;
-                font-weight: 600;
-                color: var(--tm-text-secondary);
-                text-transform: uppercase;
-                padding: 8px 16px 4px;
-                letter-spacing: 0.5px;
-            }
-            
-            .tm-sidebar-item {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                padding: 8px 16px;
-                cursor: pointer;
-                color: var(--tm-text);
-                font-size: 13px;
-                transition: background 0.15s;
-            }
-            
-            .tm-sidebar-item:hover {
-                background: var(--tm-border);
-            }
-            
-            .tm-sidebar-item.active {
-                background: var(--tm-primary, #3b82f6);
-                color: white;
-            }
-            
-            .tm-sidebar-item .icon {
-                width: 16px;
-                height: 16px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            
-            .tm-sidebar-item .count {
-                margin-left: auto;
-                font-size: 11px;
-                background: var(--tm-border);
-                padding: 2px 6px;
-                border-radius: 10px;
-            }
-            
-            .tm-main {
-                flex: 1;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-            }
-            
-            .tm-header {
-                padding: 16px;
-                border-bottom: 1px solid var(--tm-border);
-            }
+        // 加载外部CSS
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = './plugins/task-manager/styles.css';
+        document.head.appendChild(link);
+    }
+
+    createMainPanel() {
             
             .tm-search-row {
                 display: flex;
@@ -1037,6 +936,10 @@ class TaskManagerPlugin {
             </div>
             <div class="tm-main">
                 <div class="tm-header">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <span style="font-size: 18px; font-weight: 600; color: var(--tm-text);">任务管理</span>
+                        <button class="tm-btn tm-btn-secondary" id="tm-close-panel" style="padding: 6px 12px;">✕ 关闭</button>
+                    </div>
                     <div class="tm-search-row">
                         <input type="text" class="tm-search-input" id="tm-search" placeholder="搜索任务... 或输入任务名称，回车创建">
                         <button class="tm-btn tm-btn-secondary" id="tm-date-btn">📅</button>
@@ -1131,42 +1034,32 @@ class TaskManagerPlugin {
     }
 
     addTaskButton() {
-        console.log('尝试添加任务按钮...');
         const container = document.querySelector('.chat-session-inputarea-othertypes');
         if (!container) {
-            console.log('未找到容器');
             return false;
         }
 
         if (document.querySelector('.chat-session-inputarea-othertypes-task')) {
-            console.log('按钮已存在');
             return true;
         }
 
-        console.log('找到容器，准备添加按钮');
-        
         this.taskBtn = document.createElement('button');
         this.taskBtn.className = 'chat-session-inputarea-othertypes-task';
         this.taskBtn.innerHTML = '<i class="bi bi-journal-check"></i> 任务';
         this.taskBtn.title = '任务管理';
-        this.taskBtn.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 6px 10px; border: none; background: transparent; color: var(--chat-input-icon-color, #666); cursor: pointer; font-size: 13px; border-radius: 4px;';
 
         this.taskBtn.addEventListener('click', (e) => {
             e.preventDefault();
             this.togglePanel();
         });
 
-        // 找到发送按钮，在它前面插入
         const sendBtn = container.querySelector('.chat-session-inputarea-sendbtn');
         if (sendBtn) {
-            console.log('在发送按钮前插入');
             container.insertBefore(this.taskBtn, sendBtn);
         } else {
-            console.log('添加到容器末尾');
             container.appendChild(this.taskBtn);
         }
 
-        console.log('✓ 任务按钮已添加');
         return true;
     }
 
@@ -2084,9 +1977,17 @@ class TaskManagerPlugin {
     }
 
     handleDocumentClick(e) {
-        if (e.target.closest('#tm-overlay') || e.target.closest('#tm-detail-close')) {
+        // 关闭整个面板
+        if (e.target.closest('#tm-close-panel') || e.target.closest('#tm-overlay')) {
+            this.closePanel();
+            return;
+        }
+        
+        // 关闭任务详情
+        if (e.target.closest('#tm-detail-close')) {
             this.detail.style.display = 'none';
             this.selectedTask = null;
+            return;
         }
         
         const taskCard = e.target.closest('.tm-task-card[data-task]');
