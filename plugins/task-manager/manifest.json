@@ -1,0 +1,11 @@
+{
+  "id": "task-manager",
+  "name": "任务管理",
+  "version": "1.0.0",
+  "description": "参考滴答清单设计的任务管理插件，支持个人任务和团队协作",
+  "author": "CC开发团队",
+  "entry": "main.js",
+  "styles": "styles.css",
+  "permissions": ["storage", "ui", "chat", "drive", "http"],
+  "compatibility": ">=4.0.0"
+}
