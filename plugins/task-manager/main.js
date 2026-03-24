@@ -102,7 +102,6 @@ class TaskManagerPlugin {
         this.panel = document.createElement('div');
         this.panel.className = 'tm-panel';
         this.panel.innerHTML = `
-            <div class="tm-overlay" id="tm-overlay"></div>
             <div class="tm-sidebar" id="tm-sidebar">
                 <div class="tm-sidebar-section">
                     <div class="tm-smart-list" id="tm-smart-list"></div>
@@ -181,7 +180,6 @@ class TaskManagerPlugin {
         document.body.appendChild(this.panel);
         this.domElements.push(this.panel);
         
-        this.overlay = document.getElementById('tm-overlay');
         this.content = document.getElementById('tm-content');
         this.detail = document.getElementById('tm-detail');
         this.detailContent = document.getElementById('tm-detail-content');
@@ -256,7 +254,6 @@ class TaskManagerPlugin {
 
     togglePanel() {
         this.panel.classList.toggle('open');
-        this.overlay.classList.toggle('open');
         if (this.panel.classList.contains('open')) {
             this.render();
         }
@@ -264,7 +261,6 @@ class TaskManagerPlugin {
 
     closePanel() {
         this.panel.classList.remove('open');
-        this.overlay.classList.remove('open');
     }
 
     render() {
@@ -827,14 +823,8 @@ class TaskManagerPlugin {
     }
 
     handleDocumentClick(e) {
-        if (e.target.closest('#tm-close-panel') || e.target.closest('#tm-overlay')) {
+        if (e.target.closest('#tm-close-panel') || e.target.closest('#tm-detail-close')) {
             this.closePanel();
-            return;
-        }
-        
-        if (e.target.closest('#tm-detail-close')) {
-            this.detail.style.display = 'none';
-            this.selectedTask = null;
             return;
         }
         
