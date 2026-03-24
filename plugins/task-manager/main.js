@@ -55,7 +55,8 @@ class TaskManagerPlugin {
             this.initUI();
             this.registerEvents();
             this.startReminderCheck();
-            this.setupToolbarButton();
+            this.tryAddTaskButton();
+            window.tmPlugin = this;
             this.isActivated = true;
             console.log('✅ 任务管理插件已激活');
         } catch (error) {
@@ -69,7 +70,20 @@ class TaskManagerPlugin {
         this.cleanupUI();
         this.unregisterEvents();
         this.removeToolbarButton();
+        this.removeTaskButton();
+        
+        if (this.taskButtonObserver) {
+            this.taskButtonObserver.disconnect();
+            this.taskButtonObserver = null;
+        }
+        
+        if (this.taskButtonPollInterval) {
+            clearInterval(this.taskButtonPollInterval);
+            this.taskButtonPollInterval = null;
+        }
+        
         await this.saveData();
+        window.tmPlugin = null;
         this.isActivated = false;
         console.log('🛑 任务管理插件已停用');
     }
@@ -91,7 +105,6 @@ class TaskManagerPlugin {
     async initUI() {
         this.injectStyles();
         this.createMainPanel();
-        this.createToolbarButton();
         this.render();
     }
 
@@ -1071,12 +1084,93 @@ class TaskManagerPlugin {
     }
 
     setupToolbarButton() {
-        this.addEventListener(document, 'click', (e) => {
-            const sidebarItem = e.target.closest('#tm-view-calendar');
-            if (sidebarItem) {
-                this.switchView('calendar');
-            }
+        this.tryAddTaskButton();
+    }
+
+    tryAddTaskButton() {
+        if (this.addTaskButton()) {
+            return;
+        }
+
+        console.log('任务管理插件: 等待聊天界面加载...');
+
+        this.taskButtonObserver = new MutationObserver(() => {
+            this.checkAndAddTaskButton();
         });
+
+        const mainEl = document.querySelector('main');
+        if (mainEl) {
+            this.taskButtonObserver.observe(mainEl, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['class', 'style', 'hidden']
+            });
+        }
+
+        this.taskButtonPollInterval = setInterval(() => {
+            this.checkAndAddTaskButton();
+        }, 1000);
+    }
+
+    checkAndAddTaskButton() {
+        const container = document.querySelector('.chat-session-inputarea-othertypes');
+        if (container) {
+            const isHidden = container.closest('.hidden') ||
+                            container.closest('[style*="display: none"]') ||
+                            getComputedStyle(container).display === 'none';
+
+            if (!isHidden && !document.querySelector('.chat-session-inputarea-othertypes-task')) {
+                if (this.addTaskButton()) {
+                    console.log('✓ 任务按钮已成功添加');
+                    if (this.taskButtonPollInterval) {
+                        clearInterval(this.taskButtonPollInterval);
+                        this.taskButtonPollInterval = null;
+                    }
+                }
+            }
+        }
+    }
+
+    addTaskButton() {
+        const container = document.querySelector('.chat-session-inputarea-othertypes');
+        if (!container) {
+            return false;
+        }
+
+        if (document.querySelector('.chat-session-inputarea-othertypes-task')) {
+            return true;
+        }
+
+        const voteBtn = container.querySelector('.chat-session-inputarea-othertypes-vote');
+
+        this.taskBtn = document.createElement('button');
+        this.taskBtn.className = 'chat-session-inputarea-othertypes-task';
+        this.taskBtn.innerHTML = '<i class="bi bi-list-task"></i> 任务';
+        this.taskBtn.title = '任务管理';
+
+        this.taskBtn.addEventListener('click', () => this.togglePanel());
+
+        if (voteBtn) {
+            voteBtn.after(this.taskBtn);
+        } else {
+            const sendBtn = container.querySelector('.chat-session-inputarea-sendbtn');
+            if (sendBtn) {
+                container.insertBefore(this.taskBtn, sendBtn);
+            } else {
+                container.appendChild(this.taskBtn);
+            }
+        }
+
+        console.log('✓ 任务按钮已添加');
+        return true;
+    }
+
+    removeTaskButton() {
+        if (this.taskBtn) {
+            this.taskBtn.remove();
+            this.taskBtn = null;
+        }
     }
 
     togglePanel() {
