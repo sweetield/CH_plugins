@@ -1088,7 +1088,11 @@ class TaskManagerPlugin {
     }
 
     tryAddTaskButton() {
+        console.log('任务管理: tryAddTaskButton 被调用');
+        
+        // 先尝试立即添加
         if (this.addTaskButton()) {
+            console.log('立即添加成功');
             return;
         }
 
@@ -1115,51 +1119,51 @@ class TaskManagerPlugin {
 
     checkAndAddTaskButton() {
         const container = document.querySelector('.chat-session-inputarea-othertypes');
-        if (container) {
-            const isHidden = container.closest('.hidden') ||
-                            container.closest('[style*="display: none"]') ||
-                            getComputedStyle(container).display === 'none';
-
-            if (!isHidden && !document.querySelector('.chat-session-inputarea-othertypes-task')) {
-                if (this.addTaskButton()) {
-                    console.log('✓ 任务按钮已成功添加');
-                    if (this.taskButtonPollInterval) {
-                        clearInterval(this.taskButtonPollInterval);
-                        this.taskButtonPollInterval = null;
-                    }
-                }
-            }
+        
+        if (!container) {
+            return;
+        }
+        
+        const existingBtn = document.querySelector('.chat-session-inputarea-othertypes-task');
+        if (!existingBtn) {
+            this.addTaskButton();
         }
     }
 
     addTaskButton() {
+        console.log('尝试添加任务按钮...');
         const container = document.querySelector('.chat-session-inputarea-othertypes');
         if (!container) {
+            console.log('未找到容器');
             return false;
         }
 
         if (document.querySelector('.chat-session-inputarea-othertypes-task')) {
+            console.log('按钮已存在');
             return true;
         }
 
-        const voteBtn = container.querySelector('.chat-session-inputarea-othertypes-vote');
-
+        console.log('找到容器，准备添加按钮');
+        
         this.taskBtn = document.createElement('button');
         this.taskBtn.className = 'chat-session-inputarea-othertypes-task';
-        this.taskBtn.innerHTML = '<i class="bi bi-list-task"></i> 任务';
+        this.taskBtn.innerHTML = '<i class="bi bi-journal-check"></i> 任务';
         this.taskBtn.title = '任务管理';
+        this.taskBtn.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 6px 10px; border: none; background: transparent; color: var(--chat-input-icon-color, #666); cursor: pointer; font-size: 13px; border-radius: 4px;';
 
-        this.taskBtn.addEventListener('click', () => this.togglePanel());
+        this.taskBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.togglePanel();
+        });
 
-        if (voteBtn) {
-            voteBtn.after(this.taskBtn);
+        // 找到发送按钮，在它前面插入
+        const sendBtn = container.querySelector('.chat-session-inputarea-sendbtn');
+        if (sendBtn) {
+            console.log('在发送按钮前插入');
+            container.insertBefore(this.taskBtn, sendBtn);
         } else {
-            const sendBtn = container.querySelector('.chat-session-inputarea-sendbtn');
-            if (sendBtn) {
-                container.insertBefore(this.taskBtn, sendBtn);
-            } else {
-                container.appendChild(this.taskBtn);
-            }
+            console.log('添加到容器末尾');
+            container.appendChild(this.taskBtn);
         }
 
         console.log('✓ 任务按钮已添加');
