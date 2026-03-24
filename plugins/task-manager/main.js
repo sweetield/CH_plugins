@@ -275,6 +275,7 @@ class TaskManagerPlugin {
         const container = document.getElementById('tm-smart-list');
         const today = new Date().toISOString().split('T')[0];
         const smartLists = [
+            { id: 'all', name: '所有任务', filter: {} },
             { id: 'today', name: '今天', filter: { dueDate: today } },
             { id: 'tomorrow', name: '明天', filter: { dueDate: this.getTomorrow() } },
             { id: 'week', name: '本周', filter: { dueDate: this.getWeekEnd() } },
@@ -615,6 +616,30 @@ class TaskManagerPlugin {
             const search = this.currentFilter.search.toLowerCase();
             tasks = tasks.filter(t => t.title?.toLowerCase().includes(search) || t.content?.toLowerCase().includes(search));
         }
+        
+        // 智能清单过滤
+        const today = new Date().toISOString().split('T')[0];
+        const tomorrow = this.getTomorrow();
+        const weekEnd = this.getWeekEnd();
+        
+        switch (this.currentFilter.smartFilter) {
+            case 'today':
+                tasks = tasks.filter(t => t.dueDate === today);
+                break;
+            case 'tomorrow':
+                tasks = tasks.filter(t => t.dueDate === tomorrow);
+                break;
+            case 'week':
+                tasks = tasks.filter(t => t.dueDate > tomorrow && t.dueDate <= weekEnd);
+                break;
+            case 'overdue':
+                tasks = tasks.filter(t => t.dueDate && t.dueDate < today && t.status !== 'done');
+                break;
+            case 'high-priority':
+                tasks = tasks.filter(t => t.priority === 4);
+                break;
+        }
+        
         return tasks;
     }
 
@@ -641,7 +666,7 @@ class TaskManagerPlugin {
 
     selectList(listId) {
         this.currentListId = listId;
-        this.currentFilter = { tag: null, status: null, search: '' };
+        this.currentFilter = { tag: null, status: null, search: '', smartFilter: null };
         this.render();
     }
 
@@ -823,11 +848,20 @@ class TaskManagerPlugin {
     }
 
     handleDocumentClick(e) {
-        if (e.target.closest('#tm-close-panel') || e.target.closest('#tm-detail-close')) {
+        // 点击关闭按钮 - 关闭整个面板
+        if (e.target.closest('#tm-close-panel')) {
             this.closePanel();
             return;
         }
         
+        // 点击详情面板的x - 只关闭详情面板
+        if (e.target.closest('#tm-detail-close')) {
+            this.detail.style.display = 'none';
+            this.selectedTask = null;
+            return;
+        }
+        
+        // 点击任务卡片 - 显示详情
         const taskCard = e.target.closest('.tm-task-card[data-task]');
         if (taskCard && !e.target.closest('.tm-task-checkbox')) {
             const taskId = taskCard.dataset.task;
@@ -837,36 +871,67 @@ class TaskManagerPlugin {
                 this.detail.style.display = 'flex';
                 this.renderTaskDetail(task);
             }
+            return;
         }
         
+        // 点击任务复选框 - 切换状态
         const taskCheckbox = e.target.closest('.tm-task-checkbox');
         if (taskCheckbox) {
             const taskId = taskCheckbox.dataset.taskId;
             this.toggleTaskStatus(taskId);
+            return;
         }
         
+        // 点击清单
         const listItem = e.target.closest('.tm-sidebar-item[data-list]');
-        if (listItem) this.selectList(listItem.dataset.list);
+        if (listItem) {
+            this.selectList(listItem.dataset.list);
+            return;
+        }
         
+        // 点击智能清单
         const smartListItem = e.target.closest('.tm-smart-list-item');
-        if (smartListItem) { this.currentListId = null; this.render(); }
+        if (smartListItem) {
+            const smartId = smartListItem.dataset.smart;
+            this.currentListId = null;
+            this.currentFilter = { tag: null, status: null, search: '', smartFilter: smartId };
+            this.render();
+            return;
+        }
         
+        // 点击标签
         const tagItem = e.target.closest('.tm-sidebar-item[data-tag]');
-        if (tagItem) { this.currentFilter.tag = tagItem.dataset.tag; this.currentListId = null; this.render(); }
+        if (tagItem) {
+            this.currentFilter.tag = tagItem.dataset.tag;
+            this.currentListId = null;
+            this.render();
+            return;
+        }
         
-        if (e.target.closest('#tm-view-calendar')) this.switchView('calendar');
-        if (e.target.closest('#tm-view-quadrant')) this.switchView('quadrant');
-        if (e.target.closest('#tm-view-trash')) this.switchView('trash');
-        if (e.target.closest('#tm-view-stats')) this.switchView('stats');
-        if (e.target.closest('#tm-view-templates')) this.switchView('templates');
+        // 点击左侧导航项
+        if (e.target.closest('#tm-view-calendar')) { this.switchView('calendar'); return; }
+        if (e.target.closest('#tm-view-quadrant')) { this.switchView('quadrant'); return; }
+        if (e.target.closest('#tm-view-trash')) { this.switchView('trash'); return; }
+        if (e.target.closest('#tm-view-stats')) { this.switchView('stats'); return; }
+        if (e.target.closest('#tm-view-templates')) { this.switchView('templates'); return; }
         
-        if (e.target.closest('#tm-add-list')) this.showCreateListModal();
-        if (e.target.closest('#tm-add-team')) this.showCreateTeamModal();
+        if (e.target.closest('#tm-add-list')) { this.showCreateListModal(); return; }
+        if (e.target.closest('#tm-add-team')) { this.showCreateTeamModal(); return; }
         
+        // 点击日历日期
         const calendarDay = e.target.closest('.tm-calendar-day');
         if (calendarDay && !calendarDay.classList.contains('other-month')) {
             this.currentFilter.dueDate = calendarDay.dataset.date;
             this.switchView('list');
+            return;
+        }
+        
+        // 点击内容区域空白地方 - 关闭详情面板
+        const contentArea = e.target.closest('#tm-content');
+        const detailPanel = e.target.closest('#tm-detail');
+        if (contentArea && !taskCard && !taskCheckbox && this.detail.style.display === 'flex') {
+            this.detail.style.display = 'none';
+            this.selectedTask = null;
         }
     }
 
