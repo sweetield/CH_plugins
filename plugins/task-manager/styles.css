@@ -29,23 +29,25 @@
     font-size: 14px;
 }
 
-/* 面板全屏样式 */
+/* 面板全屏样式 - 默认隐藏 */
 .tm-panel {
     position: fixed;
     top: 0;
     left: 0;
-    width: 100%;
-    max-width: 100%;
+    width: 100vw;
     height: 100vh;
-    background: #ffffff !important;
-    color: #1e293b !important;
+    background: #ffffff;
+    color: #1e293b;
     z-index: 10000;
     display: none;
+    flex-direction: row;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    visibility: hidden;
 }
 
 .tm-panel.open {
-    display: flex;
+    display: flex !important;
+    visibility: visible !important;
 }
 
 .tm-panel * {
@@ -58,13 +60,10 @@
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0,0,0,0.3);
-    z-index: 9999;
+    background: transparent;
+    z-index: 9998;
     display: none;
-}
-
-.tm-overlay.open {
-    display: block;
+    pointer-events: none;
 }
 
 /* 侧边栏 */
