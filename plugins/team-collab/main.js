@@ -6224,7 +6224,7 @@ class CommentInput {
                 <div class="tc-input-footer">
                     <div class="tc-input-hint">
                         <span class="tc-hint-icon">💡</span>
-                        <span>支持 **粗体**、*斜体*、\`代码\`、```代码块```、[链接](url)</span>
+                        <span>支持 **粗体**、*斜体*、\`代码\`、\`\`\`代码块\`\`\`、[链接](url)</span>
                     </div>
                     <div class="tc-input-actions">
                         <button class="tc-btn tc-btn-secondary tc-btn-sm tc-attach-btn" title="附件">
