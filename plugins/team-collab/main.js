@@ -4469,11 +4469,16 @@ class Panel {
         this.panel.className = 'tc-panel';
         this.panel.innerHTML = `
             <div class="tc-panel-header">
-                <div class="tc-panel-title">团队协作</div>
+                <div class="tc-panel-title">👥 团队协作</div>
                 <button class="tc-panel-close" id="tc-close-panel">×</button>
             </div>
             <div class="tc-panel-body" id="tc-panel-body">
-                <!-- 内容区域 -->
+                <div class="tc-sidebar" id="tc-sidebar">
+                    <!-- 侧边栏内容 -->
+                </div>
+                <div class="tc-main-content" id="tc-main-content">
+                    <!-- 主内容区域 -->
+                </div>
             </div>
         `;
 
@@ -4517,22 +4522,41 @@ class Panel {
     }
 
     /**
-     * 设置面板内容
+     * 设置主内容区域
      * @param {string} html - HTML 内容
      */
     setContent(html) {
-        const body = document.getElementById('tc-panel-body');
-        if (body) {
-            body.innerHTML = html;
+        const mainContent = document.getElementById('tc-main-content');
+        if (mainContent) {
+            mainContent.innerHTML = html;
         }
     }
 
     /**
-     * 获取面板内容区域
+     * 设置侧边栏内容
+     * @param {string} html - HTML 内容
+     */
+    setSidebarContent(html) {
+        const sidebar = document.getElementById('tc-sidebar');
+        if (sidebar) {
+            sidebar.innerHTML = html;
+        }
+    }
+
+    /**
+     * 获取主内容区域
      * @returns {HTMLElement}
      */
     getBody() {
-        return document.getElementById('tc-panel-body');
+        return document.getElementById('tc-main-content');
+    }
+
+    /**
+     * 获取侧边栏区域
+     * @returns {HTMLElement}
+     */
+    getSidebar() {
+        return document.getElementById('tc-sidebar');
     }
 
     /**
@@ -4626,73 +4650,71 @@ class Sidebar {
         }
 
         const html = `
-            <div class="tc-sidebar">
-                <!-- 项目选择器 -->
-                <div class="tc-sidebar-section">
-                    <div class="tc-project-selector">
-                        <select class="tc-project-select" id="tc-project-select">
-                            ${projects.map(p => `
-                                <option value="${p.id}" ${p.id === this.currentProjectId ? 'selected' : ''}>
-                                    ${window.TCUtils.escapeHtml(p.name)}
-                                </option>
-                            `).join('')}
-                        </select>
+            <!-- 项目选择器 -->
+            <div class="tc-sidebar-section">
+                <div class="tc-project-selector">
+                    <select class="tc-project-select" id="tc-project-select">
+                        ${projects.map(p => `
+                            <option value="${p.id}" ${p.id === this.currentProjectId ? 'selected' : ''}>
+                                ${window.TCUtils.escapeHtml(p.name)}
+                            </option>
+                        `).join('')}
+                    </select>
+                </div>
+            </div>
+
+            <!-- 模块导航 -->
+            <div class="tc-sidebar-section">
+                <div class="tc-sidebar-title">模块</div>
+                <div class="tc-nav-list">
+                    <div class="tc-nav-item active" data-view="tasks">
+                        <span class="tc-nav-icon">📋</span>
+                        <span class="tc-nav-label">任务中心</span>
+                        <span class="tc-nav-badge" id="tc-task-count">0</span>
+                    </div>
+                    <div class="tc-nav-item" data-view="plans">
+                        <span class="tc-nav-icon">📚</span>
+                        <span class="tc-nav-label">学习计划</span>
+                    </div>
+                    <div class="tc-nav-item" data-view="inbox">
+                        <span class="tc-nav-icon">📥</span>
+                        <span class="tc-nav-label">收件箱</span>
+                        <span class="tc-nav-badge" id="tc-inbox-count" style="display:none;">0</span>
+                    </div>
+                    <div class="tc-nav-item" data-view="activity">
+                        <span class="tc-nav-icon">📊</span>
+                        <span class="tc-nav-label">活动流</span>
                     </div>
                 </div>
+            </div>
 
-                <!-- 模块导航 -->
-                <div class="tc-sidebar-section">
-                    <div class="tc-sidebar-title">模块</div>
-                    <div class="tc-nav-list">
-                        <div class="tc-nav-item active" data-view="tasks">
-                            <span class="tc-nav-icon">📋</span>
-                            <span class="tc-nav-label">任务中心</span>
-                            <span class="tc-nav-badge" id="tc-task-count">0</span>
-                        </div>
-                        <div class="tc-nav-item" data-view="plans">
-                            <span class="tc-nav-icon">📚</span>
-                            <span class="tc-nav-label">学习计划</span>
-                        </div>
-                        <div class="tc-nav-item" data-view="inbox">
-                            <span class="tc-nav-icon">📥</span>
-                            <span class="tc-nav-label">收件箱</span>
-                            <span class="tc-nav-badge" id="tc-inbox-count" style="display:none;">0</span>
-                        </div>
-                        <div class="tc-nav-item" data-view="activity">
-                            <span class="tc-nav-icon">📊</span>
-                            <span class="tc-nav-label">活动流</span>
-                        </div>
+            <!-- 数据管理 -->
+            <div class="tc-sidebar-section">
+                <div class="tc-sidebar-title">数据管理</div>
+                <div class="tc-nav-list">
+                    <div class="tc-nav-item" id="tc-import-btn">
+                        <span class="tc-nav-icon">📥</span>
+                        <span class="tc-nav-label">导入项目</span>
+                    </div>
+                    <div class="tc-nav-item" id="tc-export-btn">
+                        <span class="tc-nav-icon">📤</span>
+                        <span class="tc-nav-label">导出项目</span>
                     </div>
                 </div>
+            </div>
 
-                <!-- 数据管理 -->
-                <div class="tc-sidebar-section">
-                    <div class="tc-sidebar-title">数据管理</div>
-                    <div class="tc-nav-list">
-                        <div class="tc-nav-item" id="tc-import-btn">
-                            <span class="tc-nav-icon">📥</span>
-                            <span class="tc-nav-label">导入项目</span>
-                        </div>
-                        <div class="tc-nav-item" id="tc-export-btn">
-                            <span class="tc-nav-icon">📤</span>
-                            <span class="tc-nav-label">导出项目</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 操作按钮 -->
-                <div class="tc-sidebar-section tc-sidebar-actions">
-                    <button class="tc-btn tc-btn-primary tc-btn-block" id="tc-create-project-btn">
-                        + 创建新项目
-                    </button>
-                    <button class="tc-btn tc-btn-secondary tc-btn-block" id="tc-join-project-btn">
-                        通过邀请码加入
-                    </button>
-                </div>
+            <!-- 操作按钮 -->
+            <div class="tc-sidebar-section tc-sidebar-actions">
+                <button class="tc-btn tc-btn-primary tc-btn-block" id="tc-create-project-btn">
+                    + 创建新项目
+                </button>
+                <button class="tc-btn tc-btn-secondary tc-btn-block" id="tc-join-project-btn">
+                    通过邀请码加入
+                </button>
             </div>
         `;
 
-        this.panel.setContent(html);
+        this.panel.setSidebarContent(html);
         this.bindEvents();
         this.updateTaskCount();
     }
@@ -4722,7 +4744,7 @@ class Sidebar {
             </div>
         `;
 
-        this.panel.setContent(html);
+        this.panel.setSidebarContent(html);
         this.bindEvents();
     }
 
