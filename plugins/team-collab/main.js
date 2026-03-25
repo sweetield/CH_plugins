@@ -7667,9 +7667,6 @@ window.TCInboxView = InboxView;
             try {
                 console.log('[团队协作] 插件激活中...');
 
-                // 等待依赖加载
-                await waitForDependencies();
-
                 // 初始化核心组件
                 await this.initCore();
 
