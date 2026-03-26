@@ -1847,7 +1847,7 @@ class ProjectService {
             projectId: project.id,
             expiresAt: null,
             maxUses: null,
-            usedCount: 1,
+            usedCount: 0,
             status: 'active'
         });
 
@@ -4612,13 +4612,14 @@ window.TCPanel = Panel;
  */
 
 class Sidebar {
-    constructor(panel, projectService, indexManager, crypto, eventBus, importExportService) {
+    constructor(panel, projectService, indexManager, crypto, eventBus, importExportService, notificationService) {
         this.panel = panel;
         this.projectService = projectService;
         this.indexManager = indexManager;
         this.crypto = crypto;
         this.eventBus = eventBus;
         this.importExportService = importExportService;
+        this.notificationService = notificationService;
         this.currentUserId = null;
         this.currentProjectId = null;
     }
@@ -4685,6 +4686,10 @@ class Sidebar {
                         <span class="tc-nav-icon">📊</span>
                         <span class="tc-nav-label">活动流</span>
                     </div>
+                    <div class="tc-nav-item" data-view="project-settings">
+                        <span class="tc-nav-icon">⚙️</span>
+                        <span class="tc-nav-label">项目设置</span>
+                    </div>
                 </div>
             </div>
 
@@ -4717,6 +4722,7 @@ class Sidebar {
         this.panel.setSidebarContent(html);
         this.bindEvents();
         this.updateTaskCount();
+        this.updateInboxCount();
     }
 
     /**
@@ -4793,6 +4799,12 @@ class Sidebar {
         if (exportBtn) {
             exportBtn.addEventListener('click', () => this.showExportDialog());
         }
+
+        // 监听通知事件，更新未读数
+        const C = window.TCConstants;
+        this.eventBus.on(C.EVENTS.NOTIFICATION_RECEIVED, () => {
+            this.updateInboxCount();
+        });
     }
 
     /**
@@ -4802,6 +4814,7 @@ class Sidebar {
         // 触发项目切换事件
         this.eventBus.emit('project.changed', { projectId: this.currentProjectId });
         this.updateTaskCount();
+        this.updateInboxCount();
     }
 
     /**
@@ -4823,6 +4836,28 @@ class Sidebar {
         const countEl = document.getElementById('tc-task-count');
         if (countEl) {
             countEl.textContent = tasks.length;
+        }
+    }
+
+    /**
+     * 更新收件箱未读数量
+     */
+    async updateInboxCount() {
+        if (!this.currentUserId || !this.notificationService) return;
+
+        try {
+            const unreadCount = await this.notificationService.getUnreadCount(this.currentUserId);
+            const countEl = document.getElementById('tc-inbox-count');
+            if (countEl) {
+                if (unreadCount > 0) {
+                    countEl.textContent = unreadCount > 99 ? '99+' : unreadCount;
+                    countEl.style.display = '';
+                } else {
+                    countEl.style.display = 'none';
+                }
+            }
+        } catch (error) {
+            console.error('[Sidebar] 更新收件箱未读数失败:', error);
         }
     }
 
@@ -4891,6 +4926,9 @@ class Sidebar {
                 this.panel.api.ui.showToast('项目创建成功', 'success');
                 modal.remove();
 
+                // 显示邀请码弹窗
+                this.showInviteCodeModal(project);
+
                 // 刷新侧边栏
                 this.currentProjectId = project.id;
                 await this.render();
@@ -4898,6 +4936,49 @@ class Sidebar {
                 console.error('创建项目失败:', error);
                 this.panel.api.ui.showToast('创建项目失败: ' + error.message, 'error');
             }
+        });
+    }
+
+    /**
+     * 显示邀请码弹窗
+     * @param {Object} project - 项目对象
+     */
+    showInviteCodeModal(project) {
+        const inviteModal = document.createElement('div');
+        inviteModal.className = 'tc-modal open';
+        inviteModal.innerHTML = `
+            <div class="tc-modal-content">
+                <div class="tc-modal-header">
+                    <span class="tc-modal-title">项目创建成功</span>
+                    <button class="tc-modal-close">×</button>
+                </div>
+                <div class="tc-modal-body">
+                    <div class="tc-invite-code-display">
+                        <div class="tc-invite-label">邀请码</div>
+                        <div class="tc-invite-code">${project.inviteCode}</div>
+                        <div class="tc-invite-hint">将此邀请码分享给团队成员，他们可以通过此码加入项目</div>
+                    </div>
+                </div>
+                <div class="tc-modal-footer">
+                    <button class="tc-btn tc-btn-secondary" id="tc-copy-invite-code">复制邀请码</button>
+                    <button class="tc-btn tc-btn-primary tc-modal-cancel">完成</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(inviteModal);
+
+        // 关闭按钮
+        inviteModal.querySelector('.tc-modal-close').addEventListener('click', () => inviteModal.remove());
+        inviteModal.querySelector('.tc-modal-cancel').addEventListener('click', () => inviteModal.remove());
+
+        // 复制邀请码
+        inviteModal.querySelector('#tc-copy-invite-code').addEventListener('click', () => {
+            navigator.clipboard.writeText(project.inviteCode).then(() => {
+                this.panel.api.ui.showToast('邀请码已复制到剪贴板', 'success');
+            }).catch(() => {
+                this.panel.api.ui.showToast('复制失败，请手动复制', 'error');
+            });
         });
     }
 
@@ -5125,15 +5206,18 @@ window.TCSidebar = Sidebar;
  */
 
 class TaskBoard {
-    constructor(panel, taskService, indexManager, eventBus) {
+    constructor(panel, taskService, indexManager, eventBus, projectService, crypto) {
         this.panel = panel;
         this.taskService = taskService;
         this.indexManager = indexManager;
         this.eventBus = eventBus;
+        this.projectService = projectService;
+        this.crypto = crypto;
         this.currentProjectId = null;
         this.currentUserId = null;
         this.tasks = { todo: [], doing: [], review: [], done: [] };
         this.draggedTask = null;
+        this.projectMembers = [];
     }
 
     /**
@@ -5363,6 +5447,15 @@ class TaskBoard {
         const C = window.TCConstants;
         const modal = document.createElement('div');
         modal.className = 'tc-modal open';
+        
+        // 构建成员选项
+        const memberOptions = this.projectMembers.map(m => `
+            <label class="tc-checkbox-label">
+                <input type="checkbox" class="tc-assignee-checkbox" value="${m.userId}">
+                <span>${m.userId}</span>
+            </label>
+        `).join('');
+
         modal.innerHTML = `
             <div class="tc-modal-content">
                 <div class="tc-modal-header">
@@ -5396,6 +5489,19 @@ class TaskBoard {
                         </div>
                     </div>
                     <div class="tc-form-group">
+                        <label class="tc-form-label">负责人（可多选）</label>
+                        <div class="tc-assignee-list" id="tc-task-assignees">
+                            ${memberOptions || '<span class="tc-placeholder">暂无成员可选</span>'}
+                        </div>
+                    </div>
+                    <div class="tc-form-group">
+                        <label class="tc-form-label">可见性</label>
+                        <select class="tc-form-select" id="tc-task-visibility">
+                            <option value="${C.VISIBILITY.PROJECT}">项目成员可见</option>
+                            <option value="${C.VISIBILITY.PRIVATE}">仅相关人员可见</option>
+                        </select>
+                    </div>
+                    <div class="tc-form-group">
                         <label class="tc-form-label">标签（逗号分隔）</label>
                         <input type="text" class="tc-form-input" id="tc-task-tags" 
                                placeholder="例如：前端, 优化, 紧急">
@@ -5421,6 +5527,11 @@ class TaskBoard {
             const priority = document.getElementById('tc-task-priority').value;
             const dueDate = document.getElementById('tc-task-due-date').value;
             const tagsStr = document.getElementById('tc-task-tags').value.trim();
+            const visibility = document.getElementById('tc-task-visibility').value;
+
+            // 获取选中的负责人
+            const assigneeCheckboxes = document.querySelectorAll('.tc-assignee-checkbox:checked');
+            const assigneeIds = Array.from(assigneeCheckboxes).map(cb => cb.value);
 
             if (!title) {
                 this.panel.api.ui.showToast('请输入任务标题', 'warning');
@@ -5436,7 +5547,9 @@ class TaskBoard {
                     description,
                     priority,
                     dueDate: dueDate ? new Date(dueDate).getTime() : null,
-                    tags
+                    tags,
+                    assigneeIds,
+                    visibility
                 }, this.currentUserId);
 
                 this.panel.api.ui.showToast('任务创建成功', 'success');
@@ -5878,25 +5991,58 @@ window.TCTaskList = TaskList;
  */
 
 class TaskDetail {
-    constructor(panel, taskService, projectService, eventBus) {
+    constructor(panel, taskService, projectService, eventBus, commentService, markdownRenderer) {
         this.panel = panel;
         this.taskService = taskService;
         this.projectService = projectService;
         this.eventBus = eventBus;
+        this.commentService = commentService;
+        this.markdown = markdownRenderer;
         this.currentTask = null;
         this.currentUserId = null;
+        this.comments = [];
+        this.commentContainer = null;
     }
 
     /**
-     * 显示任务详情
-     * @param {Object} task - 任务对象
+     * 初始化
+     * @param {string} projectId - 项目 ID
      * @param {string} userId - 用户 ID
      */
-    async show(task, userId) {
-        this.currentTask = task;
+    async init(projectId, userId) {
+        this.currentProjectId = projectId;
         this.currentUserId = userId;
+        await this.loadProjectMembers();
+        await this.loadTasks();
         this.render();
         this.bindEvents();
+    }
+
+    /**
+     * 加载项目成员
+     */
+    async loadProjectMembers() {
+        if (!this.currentProjectId) return;
+        try {
+            const project = await this.projectService.getProject(this.currentProjectId);
+            this.projectMembers = project?.members || [];
+        } catch (error) {
+            console.error('[TaskBoard] 加载项目成员失败:', error);
+            this.projectMembers = [];
+        }
+    }
+
+    /**
+     * 加载评论
+     */
+    async loadComments() {
+        if (!this.currentTask) return;
+        try {
+            this.comments = await this.commentService.getTargetComments('task', this.currentTask.id);
+        } catch (error) {
+            console.error('[TaskDetail] 加载评论失败:', error);
+            this.comments = [];
+        }
     }
 
     /**
@@ -5978,7 +6124,7 @@ class TaskDetail {
                     <div class="tc-detail-section">
                         <div class="tc-section-title">任务描述</div>
                         <div class="tc-description">
-                            ${task.description ? window.TCUtils.escapeHtml(task.description) : '<span class="tc-placeholder">暂无描述</span>'}
+                            ${task.description ? this.markdown.renderSafe(task.description) : '<span class="tc-placeholder">暂无描述</span>'}
                         </div>
                     </div>
 
@@ -5996,11 +6142,73 @@ class TaskDetail {
                             <span>负责人: ${task.assigneeIds && task.assigneeIds.length > 0 ? task.assigneeIds.join(', ') : '未分配'}</span>
                         </div>
                     </div>
+
+                    <!-- 评论区 -->
+                    <div class="tc-detail-section tc-comments-section">
+                        <div class="tc-section-title">评论 (${this.comments.length})</div>
+                        
+                        <!-- 评论列表 -->
+                        <div class="tc-comment-list" id="tc-task-comments">
+                            ${this.comments.length === 0 ? `
+                                <div class="tc-comment-empty">
+                                    <div class="tc-empty-icon">💬</div>
+                                    <div class="tc-empty-text">暂无评论</div>
+                                </div>
+                            ` : this.renderComments()}
+                        </div>
+
+                        <!-- 评论输入框 -->
+                        <div class="tc-comment-input">
+                            <textarea class="tc-comment-textarea" id="tc-comment-input" 
+                                      placeholder="输入评论，支持 **Markdown** 语法..." rows="3"></textarea>
+                            <div class="tc-comment-input-footer">
+                                <div class="tc-comment-hint">支持 **粗体**、*斜体*、\`代码\`</div>
+                                <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-send-comment">发送</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         `;
 
         this.panel.setContent(html);
+    }
+
+    /**
+     * 渲染评论列表
+     * @returns {string} HTML
+     */
+    renderComments() {
+        return this.comments.map(comment => `
+            <div class="tc-comment-item" data-comment-id="${comment.id}">
+                <div class="tc-comment-avatar">
+                    <div class="tc-avatar">${this.getInitials(comment.authorId)}</div>
+                </div>
+                <div class="tc-comment-body">
+                    <div class="tc-comment-meta">
+                        <span class="tc-comment-author">${window.TCUtils.escapeHtml(comment.authorId)}</span>
+                        <span class="tc-comment-time">${window.TCUtils.formatRelativeTime(comment.createdAt)}</span>
+                    </div>
+                    <div class="tc-comment-content">${this.markdown.renderSafe(comment.body)}</div>
+                    <div class="tc-comment-actions">
+                        <button class="tc-action-btn tc-reply-btn" data-author-id="${comment.authorId}">回复</button>
+                        ${comment.authorId === this.currentUserId ? `
+                            <button class="tc-action-btn tc-delete-comment-btn" data-comment-id="${comment.id}">删除</button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    /**
+     * 获取用户名首字母
+     * @param {string} userId - 用户 ID
+     * @returns {string}
+     */
+    getInitials(userId) {
+        if (!userId) return '?';
+        return userId.substring(0, 2).toUpperCase();
     }
 
     /**
@@ -6033,6 +6241,130 @@ class TaskDetail {
         const deleteBtn = document.getElementById('tc-delete-task-btn');
         if (deleteBtn) {
             deleteBtn.addEventListener('click', () => this.confirmDelete());
+        }
+
+        // 发送评论按钮
+        const sendBtn = document.getElementById('tc-send-comment');
+        if (sendBtn) {
+            sendBtn.addEventListener('click', () => this.sendComment());
+        }
+
+        // Ctrl+Enter 发送评论
+        const commentInput = document.getElementById('tc-comment-input');
+        if (commentInput) {
+            commentInput.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key === 'Enter') {
+                    this.sendComment();
+                }
+            });
+        }
+
+        // 回复按钮
+        document.querySelectorAll('.tc-reply-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const authorId = btn.dataset.authorId;
+                this.replyToAuthor(authorId);
+            });
+        });
+
+        // 删除评论按钮
+        document.querySelectorAll('.tc-delete-comment-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const commentId = btn.dataset.commentId;
+                this.deleteComment(commentId);
+            });
+        });
+    }
+
+    /**
+     * 发送评论
+     */
+    async sendComment() {
+        const commentInput = document.getElementById('tc-comment-input');
+        const body = commentInput?.value?.trim();
+        
+        if (!body) {
+            this.panel.api.ui.showToast('请输入评论内容', 'warning');
+            return;
+        }
+
+        try {
+            await this.commentService.addComment({
+                targetType: 'task',
+                targetId: this.currentTask.id,
+                projectId: this.currentTask.projectId,
+                authorId: this.currentUserId,
+                body: body,
+                mentions: this.extractMentions(body)
+            });
+
+            this.panel.api.ui.showToast('评论已发送', 'success');
+            
+            // 清空输入框
+            commentInput.value = '';
+
+            // 重新加载评论
+            await this.loadComments();
+            this.render();
+            this.bindEvents();
+        } catch (error) {
+            console.error('发送评论失败:', error);
+            this.panel.api.ui.showToast('发送评论失败: ' + error.message, 'error');
+        }
+    }
+
+    /**
+     * 从文本中提取 @提及
+     * @param {string} text - 文本
+     * @returns {Array} 用户 ID 列表
+     */
+    extractMentions(text) {
+        const mentionRegex = /@(\w+)/g;
+        const mentions = [];
+        let match;
+        while ((match = mentionRegex.exec(text)) !== null) {
+            mentions.push(match[1]);
+        }
+        return mentions;
+    }
+
+    /**
+     * 回复作者
+     * @param {string} authorId - 作者 ID
+     */
+    replyToAuthor(authorId) {
+        const commentInput = document.getElementById('tc-comment-input');
+        if (commentInput) {
+            commentInput.value = `@${authorId} `;
+            commentInput.focus();
+        }
+    }
+
+    /**
+     * 删除评论
+     * @param {string} commentId - 评论 ID
+     */
+    async deleteComment(commentId) {
+        if (!confirm('确定要删除这条评论吗？')) return;
+
+        try {
+            // 获取线程
+            const thread = await this.commentService.getOrCreateThread('task', this.currentTask.id);
+            
+            await this.commentService.deleteComment(
+                commentId,
+                thread.id,
+                this.currentUserId
+            );
+
+            this.panel.api.ui.showToast('评论已删除', 'success');
+
+            // 重新加载评论
+            await this.loadComments();
+            this.render();
+            this.bindEvents();
+        } catch (error) {
+            this.panel.api.ui.showToast('删除评论失败: ' + error.message, 'error');
         }
     }
 
@@ -6841,14 +7173,19 @@ window.TCCommentList = CommentList;
  */
 
 class PlanView {
-    constructor(panel, planService, notificationService, eventBus) {
+    constructor(panel, planService, notificationService, eventBus, projectService, commentService, markdownRenderer) {
         this.panel = panel;
         this.planService = planService;
         this.notificationService = notificationService;
         this.eventBus = eventBus;
+        this.projectService = projectService;
+        this.commentService = commentService;
+        this.markdown = markdownRenderer;
         this.currentProjectId = null;
         this.currentUserId = null;
         this.plans = [];
+        this.projectMembers = [];
+        this.comments = [];
     }
 
     /**
@@ -6859,9 +7196,24 @@ class PlanView {
     async init(projectId, userId) {
         this.currentProjectId = projectId;
         this.currentUserId = userId;
+        await this.loadProjectMembers();
         await this.loadPlans();
         this.render();
         this.bindEvents();
+    }
+
+    /**
+     * 加载项目成员
+     */
+    async loadProjectMembers() {
+        if (!this.currentProjectId) return;
+        try {
+            const project = await this.projectService.getProject(this.currentProjectId);
+            this.projectMembers = project?.members || [];
+        } catch (error) {
+            console.error('[PlanView] 加载项目成员失败:', error);
+            this.projectMembers = [];
+        }
     }
 
     /**
@@ -7008,6 +7360,15 @@ class PlanView {
     showCreatePlanModal() {
         const modal = document.createElement('div');
         modal.className = 'tc-modal open';
+        
+        // 构建成员选项
+        const memberOptions = this.projectMembers.map(m => `
+            <label class="tc-checkbox-label">
+                <input type="checkbox" class="tc-plan-assignee-checkbox" value="${m.userId}" ${m.userId === this.currentUserId ? 'checked' : ''}>
+                <span>${m.userId}${m.userId === this.currentUserId ? ' (我)' : ''}</span>
+            </label>
+        `).join('');
+
         modal.innerHTML = `
             <div class="tc-modal-content">
                 <div class="tc-modal-header">
@@ -7035,6 +7396,12 @@ class PlanView {
                         <input type="date" class="tc-form-input" id="tc-plan-due-date">
                     </div>
                     <div class="tc-form-group">
+                        <label class="tc-form-label">参与成员（可多选）</label>
+                        <div class="tc-assignee-list" id="tc-plan-assignees">
+                            ${memberOptions || '<span class="tc-placeholder">暂无成员可选</span>'}
+                        </div>
+                    </div>
+                    <div class="tc-form-group">
                         <label class="tc-form-label">交付成果（逗号分隔）</label>
                         <input type="text" class="tc-form-input" id="tc-plan-deliverables" 
                                placeholder="例如：学习笔记, 示例代码, 分享纪要">
@@ -7059,8 +7426,17 @@ class PlanView {
             const dueDate = document.getElementById('tc-plan-due-date').value;
             const deliverablesStr = document.getElementById('tc-plan-deliverables').value.trim();
 
+            // 获取选中的成员
+            const assigneeCheckboxes = document.querySelectorAll('.tc-plan-assignee-checkbox:checked');
+            const assigneeIds = Array.from(assigneeCheckboxes).map(cb => cb.value);
+
             if (!title) {
                 this.panel.api.ui.showToast('请输入计划标题', 'warning');
+                return;
+            }
+
+            if (assigneeIds.length === 0) {
+                this.panel.api.ui.showToast('请至少选择一个参与成员', 'warning');
                 return;
             }
 
@@ -7076,7 +7452,7 @@ class PlanView {
                     objectives,
                     dueDate: dueDate ? new Date(dueDate).getTime() : null,
                     deliverables,
-                    assigneeIds: [this.currentUserId]
+                    assigneeIds: assigneeIds
                 }, this.currentUserId);
 
                 this.panel.api.ui.showToast('学习计划创建成功', 'success');
@@ -7104,8 +7480,16 @@ class PlanView {
             }
 
             const progress = await this.planService.getMemberProgress(planId, this.currentUserId);
-            this.renderPlanDetail(plan, progress);
+            
+            // 加载所有成员进度
+            const allProgress = await this.planService.getAllMemberProgress(planId);
+            
+            // 加载评论
+            this.comments = await this.commentService.getTargetComments('plan', planId);
+            
+            this.renderPlanDetail(plan, progress, allProgress);
         } catch (error) {
+            console.error('[PlanView] 获取计划详情失败:', error);
             this.panel.api.ui.showToast('获取计划详情失败', 'error');
         }
     }
@@ -7113,9 +7497,10 @@ class PlanView {
     /**
      * 渲染计划详情
      * @param {Object} plan - 计划对象
-     * @param {Object} progress - 进度对象
+     * @param {Object} progress - 当前用户进度对象
+     * @param {Object} allProgress - 所有成员进度
      */
-    renderPlanDetail(plan, progress) {
+    renderPlanDetail(plan, progress, allProgress) {
         const isOverdue = plan.submissionRule.dueDate && plan.submissionRule.dueDate < Date.now();
         const dueDateText = plan.submissionRule.dueDate
             ? window.TCUtils.formatDateTime(plan.submissionRule.dueDate)
@@ -7172,6 +7557,15 @@ class PlanView {
                         </div>
                     ` : ''}
 
+                    <!-- 所有成员进度 -->
+                    <div class="tc-detail-section">
+                        <div class="tc-section-title">团队进度</div>
+                        <div class="tc-team-progress">
+                            ${this.renderTeamProgress(allProgress)}
+                        </div>
+                    </div>
+
+                    <!-- 我的进度 -->
                     <div class="tc-detail-section">
                         <div class="tc-section-title">我的进度</div>
                         <div class="tc-progress-bar">
@@ -7193,6 +7587,29 @@ class PlanView {
                             </div>
                         </div>
                     ` : ''}
+
+                    <!-- 评论区 -->
+                    <div class="tc-detail-section tc-comments-section">
+                        <div class="tc-section-title">评论 (${this.comments.length})</div>
+                        
+                        <div class="tc-comment-list" id="tc-plan-comments">
+                            ${this.comments.length === 0 ? `
+                                <div class="tc-comment-empty">
+                                    <div class="tc-empty-icon">💬</div>
+                                    <div class="tc-empty-text">暂无评论</div>
+                                </div>
+                            ` : this.renderComments()}
+                        </div>
+
+                        <div class="tc-comment-input">
+                            <textarea class="tc-comment-textarea" id="tc-plan-comment-input" 
+                                      placeholder="输入评论，支持 **Markdown** 语法..." rows="3"></textarea>
+                            <div class="tc-comment-input-footer">
+                                <div class="tc-comment-hint">支持 **粗体**、*斜体*、\`代码\`</div>
+                                <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-send-plan-comment">发送</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         `;
@@ -7212,6 +7629,187 @@ class PlanView {
         document.getElementById('tc-submit-work').addEventListener('click', () => {
             this.showSubmitWorkModal(plan.id);
         });
+
+        // 发送评论
+        document.getElementById('tc-send-plan-comment').addEventListener('click', () => {
+            this.sendComment(plan);
+        });
+
+        // Ctrl+Enter 发送评论
+        const commentInput = document.getElementById('tc-plan-comment-input');
+        if (commentInput) {
+            commentInput.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key === 'Enter') {
+                    this.sendComment(plan);
+                }
+            });
+        }
+
+        // 回复按钮
+        document.querySelectorAll('.tc-reply-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const authorId = btn.dataset.authorId;
+                this.replyToAuthor(authorId);
+            });
+        });
+
+        // 删除评论按钮
+        document.querySelectorAll('.tc-delete-comment-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const commentId = btn.dataset.commentId;
+                this.deleteComment(commentId, plan);
+            });
+        });
+    }
+
+    /**
+     * 渲染团队进度
+     * @param {Object} allProgress - 所有成员进度
+     * @returns {string} HTML
+     */
+    renderTeamProgress(allProgress) {
+        return Object.entries(allProgress).map(([userId, prog]) => `
+            <div class="tc-team-member-progress">
+                <div class="tc-member-info">
+                    <div class="tc-member-avatar">${this.getInitials(userId)}</div>
+                    <div class="tc-member-name">${userId}${userId === this.currentUserId ? ' (我)' : ''}</div>
+                </div>
+                <div class="tc-progress-bar">
+                    <div class="tc-progress-fill" style="width: ${prog.percentage}%"></div>
+                </div>
+                <div class="tc-progress-text">${prog.percentage}%</div>
+            </div>
+        `).join('');
+    }
+
+    /**
+     * 渲染评论列表
+     * @returns {string} HTML
+     */
+    renderComments() {
+        return this.comments.map(comment => `
+            <div class="tc-comment-item" data-comment-id="${comment.id}">
+                <div class="tc-comment-avatar">
+                    <div class="tc-avatar">${this.getInitials(comment.authorId)}</div>
+                </div>
+                <div class="tc-comment-body">
+                    <div class="tc-comment-meta">
+                        <span class="tc-comment-author">${window.TCUtils.escapeHtml(comment.authorId)}</span>
+                        <span class="tc-comment-time">${window.TCUtils.formatRelativeTime(comment.createdAt)}</span>
+                    </div>
+                    <div class="tc-comment-content">${this.markdown.renderSafe(comment.body)}</div>
+                    <div class="tc-comment-actions">
+                        <button class="tc-action-btn tc-reply-btn" data-author-id="${comment.authorId}">回复</button>
+                        ${comment.authorId === this.currentUserId ? `
+                            <button class="tc-action-btn tc-delete-comment-btn" data-comment-id="${comment.id}">删除</button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    /**
+     * 获取用户名首字母
+     * @param {string} userId - 用户 ID
+     * @returns {string}
+     */
+    getInitials(userId) {
+        if (!userId) return '?';
+        return userId.substring(0, 2).toUpperCase();
+    }
+
+    /**
+     * 发送评论
+     * @param {Object} plan - 计划对象
+     */
+    async sendComment(plan) {
+        const commentInput = document.getElementById('tc-plan-comment-input');
+        const body = commentInput?.value?.trim();
+        
+        if (!body) {
+            this.panel.api.ui.showToast('请输入评论内容', 'warning');
+            return;
+        }
+
+        try {
+            await this.commentService.addComment({
+                targetType: 'plan',
+                targetId: plan.id,
+                projectId: plan.projectId,
+                authorId: this.currentUserId,
+                body: body,
+                mentions: this.extractMentions(body)
+            });
+
+            this.panel.api.ui.showToast('评论已发送', 'success');
+            commentInput.value = '';
+
+            // 重新加载评论并刷新
+            this.comments = await this.commentService.getTargetComments('plan', plan.id);
+            const progress = await this.planService.getMemberProgress(plan.id, this.currentUserId);
+            const allProgress = await this.planService.getAllMemberProgress(plan.id);
+            this.renderPlanDetail(plan, progress, allProgress);
+        } catch (error) {
+            console.error('发送评论失败:', error);
+            this.panel.api.ui.showToast('发送评论失败: ' + error.message, 'error');
+        }
+    }
+
+    /**
+     * 从文本中提取 @提及
+     * @param {string} text - 文本
+     * @returns {Array} 用户 ID 列表
+     */
+    extractMentions(text) {
+        const mentionRegex = /@(\w+)/g;
+        const mentions = [];
+        let match;
+        while ((match = mentionRegex.exec(text)) !== null) {
+            mentions.push(match[1]);
+        }
+        return mentions;
+    }
+
+    /**
+     * 回复作者
+     * @param {string} authorId - 作者 ID
+     */
+    replyToAuthor(authorId) {
+        const commentInput = document.getElementById('tc-plan-comment-input');
+        if (commentInput) {
+            commentInput.value = `@${authorId} `;
+            commentInput.focus();
+        }
+    }
+
+    /**
+     * 删除评论
+     * @param {string} commentId - 评论 ID
+     * @param {Object} plan - 计划对象
+     */
+    async deleteComment(commentId, plan) {
+        if (!confirm('确定要删除这条评论吗？')) return;
+
+        try {
+            const thread = await this.commentService.getOrCreateThread('plan', plan.id);
+            
+            await this.commentService.deleteComment(
+                commentId,
+                thread.id,
+                this.currentUserId
+            );
+
+            this.panel.api.ui.showToast('评论已删除', 'success');
+
+            // 重新加载评论并刷新
+            this.comments = await this.commentService.getTargetComments('plan', plan.id);
+            const progress = await this.planService.getMemberProgress(plan.id, this.currentUserId);
+            const allProgress = await this.planService.getAllMemberProgress(plan.id);
+            this.renderPlanDetail(plan, progress, allProgress);
+        } catch (error) {
+            this.panel.api.ui.showToast('删除评论失败: ' + error.message, 'error');
+        }
     }
 
     /**
@@ -7637,6 +8235,512 @@ class InboxView {
 
 // 导出
 window.TCInboxView = InboxView;
+/**
+ * 团队协作插件 - 项目设置视图
+ */
+
+class ProjectSettingsView {
+    constructor(panel, projectService, permissionService, eventBus, api) {
+        this.panel = panel;
+        this.projectService = projectService;
+        this.permission = permissionService;
+        this.eventBus = eventBus;
+        this.api = api;
+        this.currentProjectId = null;
+        this.currentUserId = null;
+        this.project = null;
+    }
+
+    /**
+     * 初始化
+     * @param {string} projectId - 项目 ID
+     * @param {string} userId - 用户 ID
+     */
+    async init(projectId, userId) {
+        this.currentProjectId = projectId;
+        this.currentUserId = userId;
+        await this.loadProject();
+        this.render();
+        this.bindEvents();
+    }
+
+    /**
+     * 加载项目
+     */
+    async loadProject() {
+        if (!this.currentProjectId) return;
+        try {
+            this.project = await this.projectService.getProject(this.currentProjectId);
+        } catch (error) {
+            console.error('[ProjectSettingsView] 加载项目失败:', error);
+            this.project = null;
+        }
+    }
+
+    /**
+     * 渲染视图
+     */
+    render() {
+        if (!this.project) {
+            this.panel.showEmpty('⚙️', '请选择项目', '在左侧选择一个项目来管理设置');
+            return;
+        }
+
+        const project = this.project;
+        const memberInfo = this.permission.getMemberRole(this.currentUserId, project);
+        const canEdit = this.permission.canEditProject(this.currentUserId, project);
+
+        const html = `
+            <div class="tc-project-settings">
+                <div class="tc-settings-header">
+                    <div class="tc-settings-title">项目设置</div>
+                </div>
+                <div class="tc-settings-content">
+                    <!-- 基本信息 -->
+                    <div class="tc-settings-section">
+                        <div class="tc-section-title">基本信息</div>
+                        <div class="tc-info-row">
+                            <span class="tc-info-label">项目名称</span>
+                            <span class="tc-info-value">${window.TCUtils.escapeHtml(project.name)}</span>
+                        </div>
+                        <div class="tc-info-row">
+                            <span class="tc-info-label">项目描述</span>
+                            <span class="tc-info-value">${project.description ? window.TCUtils.escapeHtml(project.description) : '<span class="tc-placeholder">暂无描述</span>'}</span>
+                        </div>
+                        <div class="tc-info-row">
+                            <span class="tc-info-label">你的角色</span>
+                            <span class="tc-info-value tc-role-badge tc-role-${memberInfo?.role || 'guest'}">${this.getRoleLabel(memberInfo?.role)}</span>
+                        </div>
+                    </div>
+
+                    <!-- 邀请码 -->
+                    <div class="tc-settings-section">
+                        <div class="tc-section-title">邀请码</div>
+                        <div class="tc-invite-code-section">
+                            <div class="tc-invite-code-box">
+                                <span class="tc-invite-code-text">${project.inviteCode || '未生成'}</span>
+                            </div>
+                            <div class="tc-invite-code-actions">
+                                <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-copy-invite">复制邀请码</button>
+                                ${canEdit ? '<button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-regenerate-invite">重新生成</button>' : ''}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 成员列表 -->
+                    <div class="tc-settings-section">
+                        <div class="tc-section-title">成员列表 (${project.members?.length || 0})</div>
+                        <div class="tc-members-list">
+                            ${this.renderMembersList(project.members || [])}
+                        </div>
+                    </div>
+
+                    <!-- 项目统计 -->
+                    <div class="tc-settings-section">
+                        <div class="tc-section-title">项目统计</div>
+                        <div class="tc-stats-grid">
+                            <div class="tc-stat-item">
+                                <div class="tc-stat-value">${project.stats?.totalTasks || 0}</div>
+                                <div class="tc-stat-label">总任务数</div>
+                            </div>
+                            <div class="tc-stat-item">
+                                <div class="tc-stat-value">${project.stats?.completedTasks || 0}</div>
+                                <div class="tc-stat-label">已完成</div>
+                            </div>
+                            <div class="tc-stat-item">
+                                <div class="tc-stat-value">${project.stats?.overdueTasks || 0}</div>
+                                <div class="tc-stat-label">已逾期</div>
+                            </div>
+                            <div class="tc-stat-item">
+                                <div class="tc-stat-value">${project.stats?.totalPlans || 0}</div>
+                                <div class="tc-stat-label">学习计划</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        this.panel.setContent(html);
+    }
+
+    /**
+     * 渲染成员列表
+     * @param {Array} members - 成员列表
+     * @returns {string} HTML
+     */
+    renderMembersList(members) {
+        return members.map(member => `
+            <div class="tc-member-item">
+                <div class="tc-member-avatar">${this.getInitials(member.userId)}</div>
+                <div class="tc-member-info">
+                    <div class="tc-member-name">${window.TCUtils.escapeHtml(member.userId)}</div>
+                    <div class="tc-member-role tc-role-${member.role}">${this.getRoleLabel(member.role)}</div>
+                </div>
+                <div class="tc-member-joined">${window.TCUtils.formatDate(member.joinedAt)}</div>
+            </div>
+        `).join('');
+    }
+
+    /**
+     * 获取用户名首字母
+     * @param {string} userId - 用户 ID
+     * @returns {string}
+     */
+    getInitials(userId) {
+        if (!userId) return '?';
+        return userId.substring(0, 2).toUpperCase();
+    }
+
+    /**
+     * 获取角色标签
+     * @param {string} role - 角色
+     * @returns {string}
+     */
+    getRoleLabel(role) {
+        const labels = {
+            'owner': '创建者',
+            'admin': '管理员',
+            'member': '成员',
+            'guest': '访客'
+        };
+        return labels[role] || '未知';
+    }
+
+    /**
+     * 绑定事件
+     */
+    bindEvents() {
+        // 复制邀请码
+        const copyBtn = document.getElementById('tc-copy-invite');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', () => this.copyInviteCode());
+        }
+
+        // 重新生成邀请码
+        const regenBtn = document.getElementById('tc-regenerate-invite');
+        if (regenBtn) {
+            regenBtn.addEventListener('click', () => this.confirmRegenerateInvite());
+        }
+    }
+
+    /**
+     * 复制邀请码
+     */
+    copyInviteCode() {
+        if (!this.project?.inviteCode) {
+            this.api.ui.showToast('邀请码不存在', 'warning');
+            return;
+        }
+
+        navigator.clipboard.writeText(this.project.inviteCode).then(() => {
+            this.api.ui.showToast('邀请码已复制到剪贴板', 'success');
+        }).catch(() => {
+            this.api.ui.showToast('复制失败，请手动复制', 'error');
+        });
+    }
+
+    /**
+     * 确认重新生成邀请码
+     */
+    confirmRegenerateInvite() {
+        const modal = document.createElement('div');
+        modal.className = 'tc-modal open';
+        modal.innerHTML = `
+            <div class="tc-modal-content">
+                <div class="tc-modal-header">
+                    <span class="tc-modal-title">重新生成邀请码</span>
+                    <button class="tc-modal-close">×</button>
+                </div>
+                <div class="tc-modal-body">
+                    <p>确定要重新生成邀请码吗？</p>
+                    <p class="tc-warning">旧的邀请码将立即失效，已使用旧邀请码的用户不受影响。</p>
+                </div>
+                <div class="tc-modal-footer">
+                    <button class="tc-btn tc-btn-secondary tc-modal-cancel">取消</button>
+                    <button class="tc-btn tc-btn-danger" id="tc-confirm-regen">重新生成</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        modal.querySelector('.tc-modal-close').addEventListener('click', () => modal.remove());
+        modal.querySelector('.tc-modal-cancel').addEventListener('click', () => modal.remove());
+
+        modal.querySelector('#tc-confirm-regen').addEventListener('click', async () => {
+            try {
+                const newCode = await this.projectService.regenerateInviteCode(
+                    this.currentProjectId,
+                    this.currentUserId
+                );
+
+                this.project.inviteCode = newCode;
+                this.api.ui.showToast('邀请码已重新生成', 'success');
+                modal.remove();
+                this.render();
+                this.bindEvents();
+            } catch (error) {
+                this.api.ui.showToast('重新生成邀请码失败: ' + error.message, 'error');
+            }
+        });
+    }
+
+    /**
+     * 刷新
+     */
+    async refresh() {
+        await this.loadProject();
+        this.render();
+        this.bindEvents();
+    }
+
+    /**
+     * 销毁
+     */
+    destroy() {
+        this.project = null;
+    }
+}
+
+// 导出
+window.TCProjectSettingsView = ProjectSettingsView;
+/**
+ * 团队协作插件 - 活动流视图
+ */
+
+class ActivityView {
+    constructor(panel, eventBus, storage, crypto) {
+        this.panel = panel;
+        this.eventBus = eventBus;
+        this.storage = storage;
+        this.crypto = crypto;
+        this.currentProjectId = null;
+        this.currentUserId = null;
+        this.activities = [];
+        this.setupEventListeners();
+    }
+
+    /**
+     * 设置事件监听，收集活动
+     */
+    setupEventListeners() {
+        const C = window.TCConstants;
+
+        // 项目创建
+        this.eventBus.on(C.EVENTS.PROJECT_CREATED, (data) => {
+            this.addActivity({
+                type: 'project_created',
+                projectId: data.projectId,
+                userId: data.userId,
+                description: '创建了项目'
+            });
+        });
+
+        // 成员加入
+        this.eventBus.on(C.EVENTS.MEMBER_JOINED, (data) => {
+            this.addActivity({
+                type: 'member_joined',
+                projectId: data.projectId,
+                userId: data.userId,
+                description: '加入了项目'
+            });
+        });
+
+        // 任务创建
+        this.eventBus.on(C.EVENTS.TASK_CREATED, (data) => {
+            this.addActivity({
+                type: 'task_created',
+                projectId: data.projectId,
+                userId: data.createdBy,
+                targetType: 'task',
+                targetId: data.taskId,
+                description: '创建了任务'
+            });
+        });
+
+        // 任务状态变更
+        this.eventBus.on(C.EVENTS.TASK_STATUS_CHANGED, (data) => {
+            const statusLabels = {
+                'todo': '待办',
+                'doing': '进行中',
+                'review': '审核中',
+                'done': '已完成'
+            };
+            this.addActivity({
+                type: 'task_status_changed',
+                projectId: data.projectId,
+                userId: data.userId,
+                targetType: 'task',
+                targetId: data.taskId,
+                description: `将任务状态从 "${statusLabels[data.from] || data.from}" 改为 "${statusLabels[data.to] || data.to}"`
+            });
+        });
+
+        // 评论添加
+        this.eventBus.on(C.EVENTS.COMMENT_ADDED, (data) => {
+            this.addActivity({
+                type: 'comment_added',
+                projectId: data.projectId,
+                userId: data.authorId,
+                targetType: data.targetType,
+                targetId: data.targetId,
+                description: '添加了评论'
+            });
+        });
+
+        // 学习计划提交
+        this.eventBus.on(C.EVENTS.PLAN_SUBMITTED, (data) => {
+            this.addActivity({
+                type: 'plan_submitted',
+                projectId: data.projectId,
+                userId: data.userId,
+                targetType: 'plan',
+                targetId: data.planId,
+                description: '提交了学习成果'
+            });
+        });
+    }
+
+    /**
+     * 添加活动
+     * @param {Object} activity - 活动对象
+     */
+    addActivity(activity) {
+        const C = window.TCConstants;
+        activity.id = C.ID_PREFIX.ACTIVITY + '_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        activity.timestamp = Date.now();
+        
+        // 添加到活动列表开头
+        this.activities.unshift(activity);
+        
+        // 限制活动数量
+        if (this.activities.length > 100) {
+            this.activities = this.activities.slice(0, 100);
+        }
+    }
+
+    /**
+     * 初始化
+     * @param {string} projectId - 项目 ID
+     * @param {string} userId - 用户 ID
+     */
+    async init(projectId, userId) {
+        this.currentProjectId = projectId;
+        this.currentUserId = userId;
+        this.render();
+        this.bindEvents();
+    }
+
+    /**
+     * 渲染视图
+     */
+    render() {
+        // 过滤当前项目的活动
+        const projectActivities = this.currentProjectId
+            ? this.activities.filter(a => a.projectId === this.currentProjectId)
+            : this.activities;
+
+        const html = `
+            <div class="tc-activity-view">
+                <div class="tc-activity-header">
+                    <div class="tc-activity-title">活动流</div>
+                    <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-clear-activities">
+                        清空记录
+                    </button>
+                </div>
+                <div class="tc-activity-content">
+                    ${projectActivities.length === 0 ? this.renderEmpty() : this.renderActivityList(projectActivities)}
+                </div>
+            </div>
+        `;
+
+        this.panel.setContent(html);
+    }
+
+    /**
+     * 渲染空状态
+     */
+    renderEmpty() {
+        return `
+            <div class="tc-activity-empty">
+                <div class="tc-empty-icon">📊</div>
+                <div class="tc-empty-title">暂无活动</div>
+                <div class="tc-empty-text">项目中的操作记录将在这里显示</div>
+            </div>
+        `;
+    }
+
+    /**
+     * 渲染活动列表
+     * @param {Array} activities - 活动列表
+     * @returns {string} HTML
+     */
+    renderActivityList(activities) {
+        const typeIcons = {
+            'project_created': '📁',
+            'member_joined': '👤',
+            'task_created': '📋',
+            'task_status_changed': '🔄',
+            'comment_added': '💬',
+            'plan_submitted': '📝'
+        };
+
+        return `
+            <div class="tc-activity-list">
+                ${activities.map(activity => `
+                    <div class="tc-activity-item">
+                        <div class="tc-activity-icon">${typeIcons[activity.type] || '📌'}</div>
+                        <div class="tc-activity-body">
+                            <div class="tc-activity-meta">
+                                <span class="tc-activity-user">${window.TCUtils.escapeHtml(activity.userId)}</span>
+                                <span class="tc-activity-desc">${activity.description}</span>
+                            </div>
+                            <div class="tc-activity-time">${window.TCUtils.formatRelativeTime(activity.timestamp)}</div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    /**
+     * 绑定事件
+     */
+    bindEvents() {
+        const clearBtn = document.getElementById('tc-clear-activities');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                if (confirm('确定要清空所有活动记录吗？')) {
+                    this.activities = this.currentProjectId
+                        ? this.activities.filter(a => a.projectId !== this.currentProjectId)
+                        : [];
+                    this.render();
+                    this.bindEvents();
+                    this.panel.api.ui.showToast('活动记录已清空', 'success');
+                }
+            });
+        }
+    }
+
+    /**
+     * 刷新
+     */
+    async refresh() {
+        this.render();
+        this.bindEvents();
+    }
+
+    /**
+     * 销毁
+     */
+    destroy() {
+        // 保留活动数据
+    }
+}
+
+// 导出
+window.TCActivityView = ActivityView;
 
     // ============ 插件主类 ============
 
@@ -7670,6 +8774,8 @@ window.TCInboxView = InboxView;
             this.commentList = null;
             this.planView = null;
             this.inboxView = null;
+            this.projectSettingsView = null;
+            this.activityView = null;
 
             // 按钮相关
             this.collabBtn = null;
@@ -7876,6 +8982,7 @@ window.TCInboxView = InboxView;
             const CommentList = window.TCCommentList;
             const PlanView = window.TCPlanView;
             const InboxView = window.TCInboxView;
+            const ProjectSettingsView = window.TCProjectSettingsView;
 
             // 创建面板
             this.panel = new Panel(this.api);
@@ -7888,7 +8995,8 @@ window.TCInboxView = InboxView;
                 this.indexManager,
                 this.crypto,
                 this.eventBus,
-                this.importExportService
+                this.importExportService,
+                this.notificationService
             );
 
             // 创建任务看板
@@ -7896,7 +9004,9 @@ window.TCInboxView = InboxView;
                 this.panel,
                 this.taskService,
                 this.indexManager,
-                this.eventBus
+                this.eventBus,
+                this.projectService,
+                this.crypto
             );
 
             // 创建任务列表
@@ -7912,7 +9022,9 @@ window.TCInboxView = InboxView;
                 this.panel,
                 this.taskService,
                 this.projectService,
-                this.eventBus
+                this.eventBus,
+                this.commentService,
+                this.markdownRenderer
             );
 
             // 创建评论输入框
@@ -7936,7 +9048,10 @@ window.TCInboxView = InboxView;
                 this.panel,
                 this.planService,
                 this.notificationService,
-                this.eventBus
+                this.eventBus,
+                this.projectService,
+                this.commentService,
+                this.markdownRenderer
             );
 
             // 创建收件箱视图
@@ -7944,6 +9059,23 @@ window.TCInboxView = InboxView;
                 this.panel,
                 this.notificationService,
                 this.eventBus
+            );
+
+            // 创建项目设置视图
+            this.projectSettingsView = new ProjectSettingsView(
+                this.panel,
+                this.projectService,
+                this.permissionService,
+                this.eventBus,
+                this.api
+            );
+
+            // 创建活动流视图
+            this.activityView = new ActivityView(
+                this.panel,
+                this.eventBus,
+                this.storage,
+                this.crypto
             );
 
             console.log('[团队协作] UI 初始化完成');
@@ -7978,6 +9110,9 @@ window.TCInboxView = InboxView;
                         break;
                     case 'activity':
                         this.showActivityView();
+                        break;
+                    case 'project-settings':
+                        await this.showProjectSettingsView();
                         break;
                 }
             });
@@ -8038,8 +9173,19 @@ window.TCInboxView = InboxView;
         /**
          * 显示活动流视图
          */
-        showActivityView() {
-            this.panel.showEmpty('📊', '活动流', '活动流功能开发中...');
+        async showActivityView() {
+            await this.activityView.init(this.currentProjectId, this.currentUserId);
+        }
+
+        /**
+         * 显示项目设置视图
+         */
+        async showProjectSettingsView() {
+            if (!this.currentProjectId) {
+                this.panel.showEmpty('⚙️', '请选择项目', '在左侧选择一个项目来管理设置');
+                return;
+            }
+            await this.projectSettingsView.init(this.currentProjectId, this.currentUserId);
         }
 
         /**
