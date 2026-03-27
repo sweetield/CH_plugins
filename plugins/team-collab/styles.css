@@ -286,35 +286,28 @@
 /* ==================== 模态框 ==================== */
 
 .tc-modal {
-    position: fixed !important;
-    inset: 0 !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background: rgba(0, 0, 0, 0.5);
     display: none;
     align-items: center;
     justify-content: center;
-    padding: 24px;
-    overflow: auto;
-    z-index: 10050 !important;
+    z-index: 2000;
 }
 
 .tc-modal.open {
-    display: flex !important;
-}
-
-body > .tc-modal {
-    position: fixed !important;
-    inset: 0 !important;
-    z-index: 10050 !important;
+    display: flex;
 }
 
 .tc-modal-content {
-    position: relative;
-    z-index: 1;
     background: var(--bg-primary, #ffffff);
     border-radius: 12px;
-    width: min(90%, 400px);
+    width: 90%;
     max-width: 400px;
-    max-height: calc(100dvh - 48px);
+    max-height: 90vh;
     overflow: hidden;
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
 }
@@ -1989,7 +1982,6 @@ body.tc-collab-open {
     width: 100vw;
     height: 100dvh;
     z-index: 9999;
-    isolation: isolate;
 }
 
 .tc-panel-header {
@@ -2325,4 +2317,61 @@ body.tc-collab-open {
         width: 100%;
         justify-content: flex-start;
     }
+}
+
+
+/* ==================== 任务清单 / 邀请口令 ==================== */
+.tc-checklist-builder {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.tc-checklist-builder-list,
+.tc-task-checklist {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.tc-checklist-builder-row,
+.tc-task-checklist-item,
+.tc-task-checklist-create {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tc-task-checklist-item {
+    padding: 10px 12px;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 10px;
+    background: var(--bg-secondary, #f9fafb);
+}
+
+.tc-task-checklist-item.done .tc-task-checklist-text {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+.tc-task-checklist-text {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.tc-task-checklist-create .tc-form-input,
+.tc-checklist-builder-row .tc-form-input {
+    flex: 1;
+}
+
+.tc-form-help {
+    font-size: 12px;
+    color: var(--text-secondary, #6b7280);
+}
+
+.tc-invite-token-textarea {
+    margin-top: 12px;
+    font-family: monospace;
+    resize: vertical;
 }
