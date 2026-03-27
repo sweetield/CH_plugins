@@ -286,28 +286,35 @@
 /* ==================== 模态框 ==================== */
 
 .tc-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    position: fixed !important;
+    inset: 0 !important;
     background: rgba(0, 0, 0, 0.5);
     display: none;
     align-items: center;
     justify-content: center;
-    z-index: 2000;
+    padding: 24px;
+    overflow: auto;
+    z-index: 10050 !important;
 }
 
 .tc-modal.open {
-    display: flex;
+    display: flex !important;
+}
+
+body > .tc-modal {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 10050 !important;
 }
 
 .tc-modal-content {
+    position: relative;
+    z-index: 1;
     background: var(--bg-primary, #ffffff);
     border-radius: 12px;
-    width: 90%;
+    width: min(90%, 400px);
     max-width: 400px;
-    max-height: 90vh;
+    max-height: calc(100dvh - 48px);
     overflow: hidden;
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
 }
@@ -1982,6 +1989,7 @@ body.tc-collab-open {
     width: 100vw;
     height: 100dvh;
     z-index: 9999;
+    isolation: isolate;
 }
 
 .tc-panel-header {
