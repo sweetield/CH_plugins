@@ -532,23 +532,6 @@ function getStatusLabel(status) {
     return labels[status] || labels[C.TASK_STATUS.TODO];
 }
 
-function normalizeUserId(value) {
-    return String(value || '').trim().replace(/^@+/, '').toLowerCase();
-}
-
-function buildUserAliases(...values) {
-    const aliasSet = new Set();
-    const push = (v) => {
-        const normalized = normalizeUserId(v);
-        if (normalized) aliasSet.add(normalized);
-    };
-    values.flat(Infinity).forEach(push);
-    if (Array.isArray(window.TCCurrentUserAliases)) {
-        window.TCCurrentUserAliases.forEach(push);
-    }
-    return Array.from(aliasSet);
-}
-
 // 导出
 window.TCUtils = {
     generateId,
@@ -562,9 +545,7 @@ window.TCUtils = {
     escapeHtml,
     getPriorityColor,
     getPriorityLabel,
-    getStatusLabel,
-    normalizeUserId,
-    buildUserAliases
+    getStatusLabel
 };
 /**
  * 团队协作插件 - Markdown 渲染器
@@ -1066,8 +1047,6 @@ class StorageAdapter {
             userProjectIndex: (userId) => `${C.USER_STORAGE_PREFIX}:${userId}:team-collab:user-project-index`,
             userTaskIndex: (userId) => `${C.USER_STORAGE_PREFIX}:${userId}:team-collab:user-task-index`,
             memberProjectIndex: (userId) => `${C.STORAGE_PREFIX}:member-project-index:${userId}`,
-            projectRegistry: () => `${C.STORAGE_PREFIX}:project-registry`,
-            projectAttachmentFolder: (projectId) => `${C.STORAGE_PREFIX}:project-attachment-folder:${projectId}`,
 
             // 项目共享（加密）
             project: (projectId) => `${C.STORAGE_PREFIX}:project:${projectId}`,
@@ -1288,26 +1267,6 @@ class StorageAdapter {
         return await this.load(keys.memberProjectIndex(userId)) || [];
     }
 
-    async saveProjectRegistry(projectIds) {
-        const keys = this.getKeys();
-        await this.save(keys.projectRegistry(), projectIds);
-    }
-
-    async loadProjectRegistry() {
-        const keys = this.getKeys();
-        return await this.load(keys.projectRegistry()) || [];
-    }
-
-    async saveProjectAttachmentFolder(projectId, folderRef) {
-        const keys = this.getKeys();
-        await this.save(keys.projectAttachmentFolder(projectId), folderRef);
-    }
-
-    async loadProjectAttachmentFolder(projectId) {
-        const keys = this.getKeys();
-        return await this.load(keys.projectAttachmentFolder(projectId));
-    }
-
     async saveAttachmentMeta(meta) {
         const keys = this.getKeys();
         await this.saveEncrypted(keys.attachmentMeta(meta.id), meta);
@@ -1465,27 +1424,19 @@ class IndexManager {
      * @returns {Promise<Array>} 项目列表
      */
     async getUserProjects(userId) {
-        const aliases = window.TCUtils.buildUserAliases(userId);
         const privateIds = await this.storage.loadUserProjectIndex(userId);
-        const sharedIndexIds = [];
-        for (const alias of aliases) {
-            const ids = await this.storage.loadSharedMemberProjectIndex(alias);
-            sharedIndexIds.push(...(ids || []));
-        }
-        const registryIds = await this.storage.loadProjectRegistry();
-        const candidateIds = Array.from(new Set([...(privateIds || []), ...(sharedIndexIds || []), ...(registryIds || [])]));
+        const sharedIds = await this.storage.loadSharedMemberProjectIndex(userId);
+        const projectIds = Array.from(new Set([...(privateIds || []), ...(sharedIds || [])]));
         const projects = [];
 
-        for (const projectId of candidateIds) {
+        for (const projectId of projectIds) {
             const project = await this.storage.loadProject(projectId);
-            if (!project || project.archivedAt) continue;
-            const members = Array.isArray(project.members) ? project.members : [];
-            const isMember = members.some(m => aliases.includes(window.TCUtils.normalizeUserId(m.userId)));
-            if (isMember) {
+            if (project && !project.archivedAt) {
                 projects.push(project);
             }
         }
 
+        // 按更新时间排序
         projects.sort((a, b) => b.updatedAt - a.updatedAt);
         return projects;
     }
@@ -1639,8 +1590,7 @@ class PermissionService {
      */
     getMemberRole(userId, project) {
         if (!project || !project.members) return null;
-        const aliases = window.TCUtils.buildUserAliases(userId);
-        return project.members.find(m => aliases.includes(window.TCUtils.normalizeUserId(m.userId))) || null;
+        return project.members.find(m => m.userId === userId) || null;
     }
 
     /**
@@ -1890,7 +1840,6 @@ class ProjectService {
             : '';
 
         const inviteCode = this.generateInviteCode();
-        const normalizedOwnerId = window.TCUtils.normalizeUserId(userId) || userId;
 
         const project = {
             id: this.generateId('PROJECT'),
@@ -1900,7 +1849,7 @@ class ProjectService {
             ownerId: userId,
             members: [
                 {
-                    userId: normalizedOwnerId,
+                    userId: userId,
                     role: C.PROJECT_ROLE.OWNER,
                     joinedAt: now
                 }
@@ -1935,22 +1884,16 @@ class ProjectService {
             status: 'active'
         });
 
-        const registry = await this.storage.loadProjectRegistry();
-        if (!registry.includes(project.id)) {
-            registry.push(project.id);
-            await this.storage.saveProjectRegistry(registry);
-        }
-
-        const ownerSharedIndex = await this.storage.loadSharedMemberProjectIndex(normalizedOwnerId);
+        const ownerSharedIndex = await this.storage.loadSharedMemberProjectIndex(userId);
         if (!ownerSharedIndex.includes(project.id)) {
             ownerSharedIndex.push(project.id);
         }
-        await this.storage.saveSharedMemberProjectIndex(normalizedOwnerId, ownerSharedIndex);
+        await this.storage.saveSharedMemberProjectIndex(userId, ownerSharedIndex);
 
         // 触发事件
         this.eventBus.emit(C.EVENTS.PROJECT_CREATED, {
             projectId: project.id,
-            userId: normalizedUserId
+            userId: userId
         });
 
         console.log('[ProjectService] 项目创建成功:', project.id);
@@ -1965,12 +1908,6 @@ class ProjectService {
     async getProject(projectId) {
         const project = await this.storage.loadProject(projectId);
         if (!project) return null;
-
-        const registry = await this.storage.loadProjectRegistry();
-        if (!registry.includes(projectId)) {
-            registry.push(projectId);
-            await this.storage.saveProjectRegistry(registry);
-        }
 
         // 解密项目名称和描述
         return {
@@ -2090,16 +2027,14 @@ class ProjectService {
             throw new TCErrors.InviteError('项目不存在');
         }
 
-        const normalizedUserId = window.TCUtils.normalizeUserId(userId) || userId;
-
         // 检查是否已经是成员
-        if (project.members.some(m => window.TCUtils.normalizeUserId(m.userId) === normalizedUserId)) {
+        if (project.members.some(m => m.userId === userId)) {
             throw new TCErrors.InviteError('你已经是该项目的成员');
         }
 
         // 添加成员
         project.members.push({
-            userId: normalizedUserId,
+            userId: userId,
             role: C.PROJECT_ROLE.MEMBER,
             joinedAt: Date.now()
         });
@@ -2113,9 +2048,7 @@ class ProjectService {
 
         // 保存项目
         await this.storage.saveProject(project);
-        const registry = await this.storage.loadProjectRegistry();
-        if (!registry.includes(project.id)) { registry.push(project.id); await this.storage.saveProjectRegistry(registry); }
-        const joinedIndex = await this.storage.loadSharedMemberProjectIndex(normalizedUserId);
+        const joinedIndex = await this.storage.loadSharedMemberProjectIndex(userId);
         if (!joinedIndex.includes(project.id)) {
             joinedIndex.push(project.id);
             await this.storage.saveSharedMemberProjectIndex(userId, joinedIndex);
@@ -2139,7 +2072,7 @@ class ProjectService {
      */
     async inviteMember(projectId, targetUserId, operatorId) {
         const C = window.TCConstants;
-        const normalizedTargetUserId = window.TCUtils.normalizeUserId(targetUserId) || String(targetUserId || '').trim();
+        targetUserId = String(targetUserId || '').trim().replace(/^@+/, '');
         const project = await this.storage.loadProject(projectId);
 
         if (!project) {
@@ -2151,12 +2084,14 @@ class ProjectService {
             '邀请成员'
         );
 
-        if (project.members.some(m => window.TCUtils.normalizeUserId(m.userId) === normalizedTargetUserId)) {
+        // 检查是否已经是成员
+        if (project.members.some(m => m.userId === targetUserId)) {
             throw new TCErrors.TCError('该用户已经是项目成员', 'ALREADY_MEMBER');
         }
 
+        // 添加成员
         project.members.push({
-            userId: normalizedTargetUserId,
+            userId: targetUserId,
             role: C.PROJECT_ROLE.MEMBER,
             joinedAt: Date.now()
         });
@@ -2165,28 +2100,16 @@ class ProjectService {
         project.version = (project.version || 1) + 1;
 
         await this.storage.saveProject(project);
-
-        const registry = await this.storage.loadProjectRegistry();
-        if (!registry.includes(project.id)) {
-            registry.push(project.id);
-            await this.storage.saveProjectRegistry(registry);
-        }
-
-        const memberIndex = await this.storage.loadSharedMemberProjectIndex(normalizedTargetUserId);
+        const memberIndex = await this.storage.loadSharedMemberProjectIndex(targetUserId);
         if (!memberIndex.includes(project.id)) {
             memberIndex.push(project.id);
-            await this.storage.saveSharedMemberProjectIndex(normalizedTargetUserId, memberIndex);
+            await this.storage.saveSharedMemberProjectIndex(targetUserId, memberIndex);
         }
 
-        const privateIndex = await this.storage.loadUserProjectIndex(normalizedTargetUserId);
-        if (!privateIndex.includes(project.id)) {
-            privateIndex.push(project.id);
-            await this.storage.saveUserProjectIndex(normalizedTargetUserId, privateIndex);
-        }
-
+        // 触发事件
         this.eventBus.emit(C.EVENTS.MEMBER_JOINED, {
             projectId: project.id,
-            userId: normalizedTargetUserId
+            userId: targetUserId
         });
     }
 
@@ -3190,8 +3113,7 @@ window.TCCommentService = CommentService;
  * 团队协作插件 - 附件服务
  */
 class AttachmentService {
-    constructor(api, storage) {
-        this.api = api;
+    constructor(storage) {
         this.storage = storage;
     }
 
@@ -3199,145 +3121,62 @@ class AttachmentService {
         return 'att_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
     }
 
-    async fileToDataUrl(file) {
+    async fileToBase64(file) {
         return await new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onload = () => {
+                const result = String(reader.result || '');
+                const base64 = result.includes(',') ? result.split(',')[1] : result;
+                resolve(base64);
+            };
             reader.onerror = reject;
             reader.readAsDataURL(file);
         });
-    }
-
-    normalizeRef(value) {
-        if (!value) return '';
-        if (typeof value === 'string') return value;
-        return value.id || value.fileId || value.folderId || value.path || value.url || value?.data?.id || value?.data?.fileId || '';
-    }
-
-    normalizeDownloadUrl(result) {
-        if (!result) return '';
-        if (typeof result === 'string') return result;
-        if (typeof Blob !== 'undefined' && result instanceof Blob) return URL.createObjectURL(result);
-        if (typeof File !== 'undefined' && result instanceof File) return URL.createObjectURL(result);
-        if (typeof ArrayBuffer !== 'undefined' && result instanceof ArrayBuffer) return URL.createObjectURL(new Blob([result]));
-        return result.url || result.downloadUrl || result.previewUrl || result?.data?.url || result?.data?.downloadUrl || '';
-    }
-
-    async ensureProjectFolder(projectId) {
-        let folderRef = await this.storage.loadProjectAttachmentFolder(projectId);
-        if (folderRef) return folderRef;
-        if (!this.api?.drive?.createFolder) return '';
-        try {
-            const created = await this.api.drive.createFolder(`team-collab-${projectId}`);
-            folderRef = this.normalizeRef(created);
-            if (folderRef) {
-                await this.storage.saveProjectAttachmentFolder(projectId, folderRef);
-            }
-            return folderRef || '';
-        } catch (error) {
-            console.warn('[AttachmentService] 创建项目附件目录失败，尝试直接上传:', error);
-            return '';
-        }
-    }
-
-    async uploadSingleFile(file, projectId, userId) {
-        if (!file) return null;
-        if (file.size > 20 * 1024 * 1024) {
-            throw new Error(`文件过大：${file.name}，请控制在 20MB 以内`);
-        }
-
-        const attachmentId = this.generateId();
-        const kind = (file.type || '').startsWith('image/') ? 'image' : 'file';
-        const folderRef = await this.ensureProjectFolder(projectId);
-
-        let fileId = '';
-        let downloadUrl = '';
-        if (!this.api?.drive?.uploadFile) {
-            throw new Error('宿主未提供 drive.uploadFile，无法执行真实文件上传');
-        }
-
-        try {
-            const uploaded = await this.api.drive.uploadFile(file, folderRef || undefined);
-            fileId = this.normalizeRef(uploaded);
-            downloadUrl = this.normalizeDownloadUrl(uploaded);
-        } catch (error) {
-            if (folderRef) {
-                const uploaded = await this.api.drive.uploadFile(file, undefined);
-                fileId = this.normalizeRef(uploaded);
-                downloadUrl = this.normalizeDownloadUrl(uploaded);
-            } else {
-                throw error;
-            }
-        }
-
-        const previewDataUrl = kind === 'image' ? await this.fileToDataUrl(file) : '';
-        const meta = {
-            id: attachmentId,
-            projectId,
-            uploadedBy: userId,
-            name: file.name,
-            size: file.size,
-            type: file.type || 'application/octet-stream',
-            kind,
-            createdAt: Date.now(),
-            fileId,
-            folderRef: folderRef || '',
-            downloadUrl: downloadUrl || '',
-            previewDataUrl: previewDataUrl || ''
-        };
-
-        await this.storage.saveAttachmentMeta(meta);
-
-        return {
-            attachmentId,
-            name: meta.name,
-            type: meta.type,
-            size: meta.size,
-            kind: meta.kind,
-            fileId: meta.fileId,
-            downloadUrl: meta.downloadUrl,
-            previewUrl: meta.previewDataUrl || meta.downloadUrl || ''
-        };
     }
 
     async uploadFiles(files, projectId, userId) {
         const list = Array.from(files || []);
         const uploaded = [];
         for (const file of list) {
-            const item = await this.uploadSingleFile(file, projectId, userId);
-            if (item) uploaded.push(item);
+            if (!file) continue;
+            if (file.size > 5 * 1024 * 1024) {
+                throw new Error(`文件过大：${file.name}，请控制在 5MB 以内`);
+            }
+            const attachmentId = this.generateId();
+            const base64 = await this.fileToBase64(file);
+            const meta = {
+                id: attachmentId,
+                projectId,
+                uploadedBy: userId,
+                name: file.name,
+                size: file.size,
+                type: file.type || 'application/octet-stream',
+                kind: (file.type || '').startsWith('image/') ? 'image' : 'file',
+                createdAt: Date.now()
+            };
+            await this.storage.saveAttachmentMeta(meta);
+            await this.storage.saveAttachmentBlob(attachmentId, base64);
+            uploaded.push({
+                attachmentId,
+                name: meta.name,
+                type: meta.type,
+                size: meta.size,
+                kind: meta.kind,
+                url: `tc-attachment://${attachmentId}`
+            });
         }
         return uploaded;
-    }
-
-    async resolveDownloadUrl(meta) {
-        if (!meta) return '';
-        if (meta.downloadUrl) return meta.downloadUrl;
-        if (!meta.fileId || !this.api?.drive?.downloadFile) return '';
-        try {
-            const downloaded = await this.api.drive.downloadFile(meta.fileId);
-            return this.normalizeDownloadUrl(downloaded);
-        } catch (error) {
-            console.warn('[AttachmentService] 获取下载地址失败:', error);
-            return '';
-        }
     }
 
     async getAttachment(attachmentId) {
         const meta = await this.storage.loadAttachmentMeta(attachmentId);
         if (!meta) return null;
-
-        const legacyBase64 = await this.storage.loadAttachmentBlob(attachmentId);
-        const downloadUrl = await this.resolveDownloadUrl(meta);
-        const previewUrl = meta.previewDataUrl || (meta.kind === 'image' ? downloadUrl : '');
-        const legacyDataUrl = legacyBase64 ? `data:${meta.type || 'application/octet-stream'};base64,${legacyBase64}` : '';
-
+        const base64 = await this.storage.loadAttachmentBlob(attachmentId);
+        if (!base64) return null;
         return {
             ...meta,
-            url: downloadUrl || previewUrl || legacyDataUrl || '',
-            downloadUrl: downloadUrl || legacyDataUrl || '',
-            previewUrl: previewUrl || legacyDataUrl || '',
-            dataUrl: previewUrl || legacyDataUrl || downloadUrl || ''
+            dataUrl: `data:${meta.type || 'application/octet-stream'};base64,${base64}`,
+            url: `tc-attachment://${attachmentId}`
         };
     }
 
@@ -5529,21 +5368,9 @@ class TaskBoard {
     async init(projectId, userId) {
         this.currentProjectId = projectId;
         this.currentUserId = userId;
-        await this.loadProjectMembers();
         await this.loadTasks();
         this.render();
         this.bindEvents();
-    }
-
-    async loadProjectMembers() {
-        if (!this.currentProjectId || !window.tcPlugin?.projectService) return;
-        try {
-            const project = await window.tcPlugin.projectService.getProject(this.currentProjectId);
-            this.projectMembers = Array.isArray(project?.members) ? project.members : [];
-        } catch (error) {
-            console.error('[TaskList] 加载项目成员失败:', error);
-            this.projectMembers = [];
-        }
     }
 
     /**
@@ -5930,7 +5757,6 @@ class TaskList {
         this.currentProjectId = null;
         this.currentUserId = null;
         this.tasks = [];
-        this.projectMembers = [];
         this.filters = {};
         this.sortBy = 'updatedAt';
         this.sortOrder = 'desc';
@@ -6188,12 +6014,6 @@ class TaskList {
         const C = window.TCConstants;
         const modal = document.createElement('div');
         modal.className = 'tc-modal open';
-        const memberOptions = (this.projectMembers || []).map(m => `
-            <label class="tc-checkbox-label">
-                <input type="checkbox" class="tc-assignee-checkbox" value="${m.userId}" ${window.TCUtils.normalizeUserId(m.userId) === window.TCUtils.normalizeUserId(this.currentUserId) ? 'checked' : ''}>
-                <span>${m.userId}${window.TCUtils.normalizeUserId(m.userId) === window.TCUtils.normalizeUserId(this.currentUserId) ? ' (我)' : ''}</span>
-            </label>
-        `).join('');
         modal.innerHTML = `
             <div class="tc-modal-content">
                 <div class="tc-modal-header">
@@ -6226,12 +6046,6 @@ class TaskList {
                             <input type="date" class="tc-form-input" id="tc-task-due-date">
                         </div>
                     </div>
-                    <div class="tc-form-group">
-                        <label class="tc-form-label">负责人（可多选）</label>
-                        <div class="tc-assignee-list" id="tc-task-assignees">
-                            ${memberOptions || '<span class="tc-placeholder">暂无成员可选</span>'}
-                        </div>
-                    </div>
                 </div>
                 <div class="tc-modal-footer">
                     <button class="tc-btn tc-btn-secondary tc-modal-cancel">取消</button>
@@ -6250,7 +6064,6 @@ class TaskList {
             const description = document.getElementById('tc-task-description').value.trim();
             const priority = document.getElementById('tc-task-priority').value;
             const dueDate = document.getElementById('tc-task-due-date').value;
-            const assigneeIds = Array.from(document.querySelectorAll('.tc-assignee-checkbox:checked')).map(cb => cb.value);
 
             if (!title) {
                 this.panel.api.ui.showToast('请输入任务标题', 'warning');
@@ -6263,7 +6076,6 @@ class TaskList {
                     title,
                     description,
                     priority,
-                    assigneeIds,
                     dueDate: dueDate ? new Date(dueDate).getTime() : null
                 }, this.currentUserId);
 
@@ -6557,11 +6369,11 @@ class TaskDetail {
             <div class="tc-comment-attachments">
                 ${attachments.map(att => att.kind === 'image' ? `
                     <div class="tc-comment-attachment is-image">
-                        <img src="${att.previewUrl || att.dataUrl || att.downloadUrl || att.url}" alt="${window.TCUtils.escapeHtml(att.name)}">
+                        <img src="${att.dataUrl}" alt="${window.TCUtils.escapeHtml(att.name)}">
                         <div class="tc-comment-attachment-meta">${window.TCUtils.escapeHtml(att.name)} · ${this.formatFileSize(att.size)}</div>
                     </div>
                 ` : `
-                    <a class="tc-comment-attachment is-file" href="${att.downloadUrl || att.url || att.dataUrl}" download="${window.TCUtils.escapeHtml(att.name)}" target="_blank" rel="noopener noreferrer">
+                    <a class="tc-comment-attachment is-file" href="${att.dataUrl}" download="${window.TCUtils.escapeHtml(att.name)}">
                         <span>📎 ${window.TCUtils.escapeHtml(att.name)}</span>
                         <span>${this.formatFileSize(att.size)}</span>
                     </a>
@@ -6955,14 +6767,12 @@ window.TCTaskDetail = TaskDetail;
  */
 
 class CommentInput {
-    constructor(panel, commentService, markdownRenderer, eventBus, attachmentService) {
+    constructor(panel, commentService, markdownRenderer, eventBus) {
         this.panel = panel;
         this.commentService = commentService;
         this.markdown = markdownRenderer;
         this.eventBus = eventBus;
-        this.attachmentService = attachmentService;
         this.currentUserId = null;
-        this.pendingAttachments = [];
         this.targetType = null;
         this.targetId = null;
         this.projectId = null;
@@ -6998,7 +6808,6 @@ class CommentInput {
                     <div class="tc-preview-pane ${this.isPreviewMode ? 'active' : ''}">
                         <div class="tc-preview-content">预览将在这里显示...</div>
                     </div>
-                    <div class="tc-comment-attachment-list">${this.renderPendingAttachments ? this.renderPendingAttachments(this.pendingAttachments) : ''}</div>
                 </div>
                 <div class="tc-input-footer">
                     <div class="tc-input-hint">
@@ -7117,17 +6926,13 @@ class CommentInput {
                 projectId: this.projectId,
                 authorId: this.currentUserId,
                 body: body,
-                mentions: this.extractMentions(body),
-                attachmentIds: this.pendingAttachments.map(item => item.attachmentId)
+                mentions: this.extractMentions(body)
             });
 
             this.panel.api.ui.showToast('评论已发送', 'success');
 
             // 清空输入框
             this.textarea.value = '';
-            this.pendingAttachments = [];
-            const attachmentList = this.container.querySelector('.tc-comment-attachment-list');
-            if (attachmentList) attachmentList.innerHTML = this.renderPendingAttachments(this.pendingAttachments);
             if (this.isPreviewMode) {
                 this.togglePreview(false);
             }
@@ -7198,27 +7003,14 @@ class CommentInput {
      * 处理附件
      * @param {Array} files - 文件列表
      */
-    renderPendingAttachments(items) {
-        const list = Array.isArray(items) ? items : [];
-        if (list.length === 0) return '<div class="tc-comment-attachment-empty">暂未添加附件</div>';
-        return list.map(item => `
-            <div class="tc-pending-attachment ${item.kind === 'image' ? 'is-image' : 'is-file'}">
-                <span class="tc-pending-attachment-name">${window.TCUtils.escapeHtml(item.name)}</span>
-                <span class="tc-pending-attachment-meta">${Math.max(1, Math.round((item.size || 0) / 1024))} KB</span>
-            </div>
-        `).join('');
-    }
-
     async handleAttachments(files) {
-        if (!this.attachmentService) {
-            this.panel.api.ui.showToast('当前版本未启用真实附件上传', 'warning');
-            return;
-        }
-        const uploaded = await this.attachmentService.uploadFiles(files, this.projectId, this.currentUserId);
-        this.pendingAttachments.push(...uploaded);
-        const attachmentList = this.container.querySelector('.tc-comment-attachment-list');
-        if (attachmentList) attachmentList.innerHTML = this.renderPendingAttachments(this.pendingAttachments);
-        this.panel.api.ui.showToast('附件上传成功', 'success');
+        // 简单实现：显示文件名
+        const fileNames = files.map(f => f.name).join(', ');
+        this.panel.api.ui.showToast(`已选择附件: ${fileNames}`, 'info');
+
+        // 在输入框中插入附件标记
+        const attachmentText = files.map(f => `\n[附件: ${f.name}]`).join('');
+        this.textarea.value += attachmentText;
     }
 
     /**
@@ -7382,11 +7174,11 @@ class CommentList {
             <div class="tc-comment-attachments">
                 ${attachments.map(att => att.kind === 'image' ? `
                     <div class="tc-comment-attachment is-image">
-                        <img src="${att.previewUrl || att.dataUrl || att.downloadUrl || att.url}" alt="${window.TCUtils.escapeHtml(att.name)}">
+                        <img src="${att.dataUrl}" alt="${window.TCUtils.escapeHtml(att.name)}">
                         <div class="tc-comment-attachment-meta">${window.TCUtils.escapeHtml(att.name)} · ${this.formatFileSize(att.size)}</div>
                     </div>
                 ` : `
-                    <a class="tc-comment-attachment is-file" href="${att.downloadUrl || att.url || att.dataUrl}" download="${window.TCUtils.escapeHtml(att.name)}" target="_blank" rel="noopener noreferrer">
+                    <a class="tc-comment-attachment is-file" href="${att.dataUrl}" download="${window.TCUtils.escapeHtml(att.name)}">
                         <span>📎 ${window.TCUtils.escapeHtml(att.name)}</span>
                         <span>${this.formatFileSize(att.size)}</span>
                     </a>
@@ -8231,11 +8023,11 @@ class PlanView {
             <div class="tc-comment-attachments">
                 ${attachments.map(att => att.kind === 'image' ? `
                     <div class="tc-comment-attachment is-image">
-                        <img src="${att.previewUrl || att.dataUrl || att.downloadUrl || att.url}" alt="${window.TCUtils.escapeHtml(att.name)}">
+                        <img src="${att.dataUrl}" alt="${window.TCUtils.escapeHtml(att.name)}">
                         <div class="tc-comment-attachment-meta">${window.TCUtils.escapeHtml(att.name)} · ${this.formatFileSize(att.size)}</div>
                     </div>
                 ` : `
-                    <a class="tc-comment-attachment is-file" href="${att.downloadUrl || att.url || att.dataUrl}" download="${window.TCUtils.escapeHtml(att.name)}" target="_blank" rel="noopener noreferrer">
+                    <a class="tc-comment-attachment is-file" href="${att.dataUrl}" download="${window.TCUtils.escapeHtml(att.name)}">
                         <span>📎 ${window.TCUtils.escapeHtml(att.name)}</span>
                         <span>${this.formatFileSize(att.size)}</span>
                     </a>
@@ -9518,7 +9310,7 @@ window.TCActivityView = ActivityView;
 
             // 附件服务
             const AttachmentService = window.TCAttachmentService;
-            this.attachmentService = new AttachmentService(this.api, this.storage);
+            this.attachmentService = new AttachmentService(this.storage);
 
             // 学习计划服务
             this.planService = new PlanService(
@@ -9569,9 +9361,7 @@ window.TCActivityView = ActivityView;
                     response?.id
                 ].map(v => String(v || '').trim()).filter(Boolean);
                 if (candidates.length > 0) {
-                    const aliases = Array.from(new Set(candidates.map(v => window.TCUtils.normalizeUserId(v)).filter(Boolean)));
-                    window.TCCurrentUserAliases = aliases;
-                    this.currentUserId = aliases[0];
+                    this.currentUserId = candidates[0].replace(/^@+/, '');
                 }
             } catch (error) {
                 console.warn('[团队协作] 获取用户信息失败，使用默认值');
@@ -9583,8 +9373,7 @@ window.TCActivityView = ActivityView;
                     userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
                     await this.api.storage.set('plugin:team-collab:temp-user-id', userId);
                 }
-                this.currentUserId = window.TCUtils.normalizeUserId(userId) || userId;
-                window.TCCurrentUserAliases = [this.currentUserId];
+                this.currentUserId = userId;
             }
 
             console.log('[团队协作] 当前用户 ID:', this.currentUserId);
@@ -9654,8 +9443,7 @@ window.TCActivityView = ActivityView;
                 this.panel,
                 this.commentService,
                 this.markdownRenderer,
-                this.eventBus,
-                this.attachmentService
+                this.eventBus
             );
 
             // 创建评论列表
