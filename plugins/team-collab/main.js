@@ -10,7 +10,8 @@
  */
 
 // 存储键前缀
-const STORAGE_PREFIX = 'plugin:shared:team-collab';
+const STORAGE_PREFIX = 'plugin:shared:team-collab:data';
+const LEGACY_SHARED_STORAGE_PREFIX = 'plugin:shared:team-collab';
 const USER_STORAGE_PREFIX = 'plugin';
 
 // 对象 ID 前缀
@@ -133,6 +134,7 @@ const SCHEMA_VERSION = '3.1.0';
 // 导出常量
 window.TCConstants = {
     STORAGE_PREFIX,
+    LEGACY_SHARED_STORAGE_PREFIX,
     USER_STORAGE_PREFIX,
     ID_PREFIX,
     PROJECT_ROLE,
@@ -1045,6 +1047,16 @@ class StorageAdapter {
      */
     getKeys() {
         const C = window.TCConstants;
+        return this.buildKeyMap(C.STORAGE_PREFIX);
+    }
+
+    getLegacyKeys() {
+        const C = window.TCConstants;
+        return this.buildKeyMap(C.LEGACY_SHARED_STORAGE_PREFIX);
+    }
+
+    buildKeyMap(sharedPrefix) {
+        const C = window.TCConstants;
         return {
             // 用户私有
             config: (userId) => `${C.USER_STORAGE_PREFIX}:${userId}:team-collab:config`,
@@ -1054,24 +1066,43 @@ class StorageAdapter {
             userTaskIndex: (userId) => `${C.USER_STORAGE_PREFIX}:${userId}:team-collab:user-task-index`,
 
             // 项目共享（加密）
-            project: (projectId) => `${C.STORAGE_PREFIX}:project:${projectId}`,
-            projectMembers: (projectId) => `${C.STORAGE_PREFIX}:project-members:${projectId}`,
-            projectTaskIndex: (projectId) => `${C.STORAGE_PREFIX}:project-task-index:${projectId}`,
-            projectPlanIndex: (projectId) => `${C.STORAGE_PREFIX}:project-plan-index:${projectId}`,
-            projectThreadIndex: (projectId) => `${C.STORAGE_PREFIX}:project-thread-index:${projectId}`,
-            projectActivityIndex: (projectId) => `${C.STORAGE_PREFIX}:project-activity-index:${projectId}`,
+            project: (projectId) => `${sharedPrefix}:project:${projectId}`,
+            projectMembers: (projectId) => `${sharedPrefix}:project-members:${projectId}`,
+            projectTaskIndex: (projectId) => `${sharedPrefix}:project-task-index:${projectId}`,
+            projectPlanIndex: (projectId) => `${sharedPrefix}:project-plan-index:${projectId}`,
+            projectThreadIndex: (projectId) => `${sharedPrefix}:project-thread-index:${projectId}`,
+            projectActivityIndex: (projectId) => `${sharedPrefix}:project-activity-index:${projectId}`,
 
             // 对象存储
-            task: (taskId) => `${C.STORAGE_PREFIX}:task:${taskId}`,
-            plan: (planId) => `${C.STORAGE_PREFIX}:plan:${planId}`,
-            thread: (threadId) => `${C.STORAGE_PREFIX}:thread:${threadId}`,
-            threadComments: (threadId, page = 1) => `${C.STORAGE_PREFIX}:thread-comments:${threadId}:${page}`,
-            attachmentMeta: (attId) => `${C.STORAGE_PREFIX}:attachment-meta:${attId}`,
-            attachmentBlob: (attId) => `${C.STORAGE_PREFIX}:attachment-blob:${attId}`,
+            task: (taskId) => `${sharedPrefix}:task:${taskId}`,
+            plan: (planId) => `${sharedPrefix}:plan:${planId}`,
+            thread: (threadId) => `${sharedPrefix}:thread:${threadId}`,
+            threadComments: (threadId, page = 1) => `${sharedPrefix}:thread-comments:${threadId}:${page}`,
+            attachmentMeta: (attId) => `${sharedPrefix}:attachment-meta:${attId}`,
+            attachmentBlob: (attId) => `${sharedPrefix}:attachment-blob:${attId}`,
 
             // 邀请码
-            invite: (code) => `${C.STORAGE_PREFIX}:invite:${code}`
+            invite: (code) => `${sharedPrefix}:invite:${code}`
         };
+    }
+
+    async saveSharedBoth(primaryKey, legacyKey, data, encrypted = false) {
+        if (encrypted) {
+            await this.saveEncrypted(primaryKey, data);
+            await this.saveEncrypted(legacyKey, data);
+        } else {
+            await this.save(primaryKey, data);
+            await this.save(legacyKey, data);
+        }
+    }
+
+    async loadSharedWithFallback(primaryKey, legacyKey, encrypted = false, defaultValue = null) {
+        const loader = encrypted ? this.loadEncrypted.bind(this) : this.load.bind(this);
+        const primary = await loader(primaryKey);
+        if (primary !== null && primary !== undefined) return primary;
+        const legacy = await loader(legacyKey);
+        if (legacy !== null && legacy !== undefined) return legacy;
+        return defaultValue;
     }
 
     /**
@@ -1152,7 +1183,8 @@ class StorageAdapter {
      */
     async saveProject(project) {
         const keys = this.getKeys();
-        await this.saveEncrypted(keys.project(project.id), project);
+        const legacyKeys = this.getLegacyKeys();
+        await this.saveSharedBoth(keys.project(project.id), legacyKeys.project(project.id), project, true);
     }
 
     /**
@@ -1162,7 +1194,8 @@ class StorageAdapter {
      */
     async loadProject(projectId) {
         const keys = this.getKeys();
-        return await this.loadEncrypted(keys.project(projectId));
+        const legacyKeys = this.getLegacyKeys();
+        return await this.loadSharedWithFallback(keys.project(projectId), legacyKeys.project(projectId), true);
     }
 
     /**
@@ -1171,7 +1204,8 @@ class StorageAdapter {
      */
     async saveTask(task) {
         const keys = this.getKeys();
-        await this.saveEncrypted(keys.task(task.id), task);
+        const legacyKeys = this.getLegacyKeys();
+        await this.saveSharedBoth(keys.task(task.id), legacyKeys.task(task.id), task, true);
     }
 
     /**
@@ -1181,7 +1215,8 @@ class StorageAdapter {
      */
     async loadTask(taskId) {
         const keys = this.getKeys();
-        return await this.loadEncrypted(keys.task(taskId));
+        const legacyKeys = this.getLegacyKeys();
+        return await this.loadSharedWithFallback(keys.task(taskId), legacyKeys.task(taskId), true);
     }
 
     /**
@@ -1229,7 +1264,8 @@ class StorageAdapter {
      */
     async saveInviteCode(code, inviteData) {
         const keys = this.getKeys();
-        await this.save(keys.invite(code), inviteData);
+        const legacyKeys = this.getLegacyKeys();
+        await this.saveSharedBoth(keys.invite(code), legacyKeys.invite(code), inviteData, false);
     }
 
     /**
@@ -1239,7 +1275,8 @@ class StorageAdapter {
      */
     async loadInviteCode(code) {
         const keys = this.getKeys();
-        return await this.load(keys.invite(code));
+        const legacyKeys = this.getLegacyKeys();
+        return await this.loadSharedWithFallback(keys.invite(code), legacyKeys.invite(code), false);
     }
 
     /**
@@ -1269,7 +1306,8 @@ class StorageAdapter {
      */
     async saveProjectTaskIndex(projectId, taskIds) {
         const keys = this.getKeys();
-        await this.save(keys.projectTaskIndex(projectId), taskIds);
+        const legacyKeys = this.getLegacyKeys();
+        await this.saveSharedBoth(keys.projectTaskIndex(projectId), legacyKeys.projectTaskIndex(projectId), taskIds, false);
     }
 
     /**
@@ -1279,7 +1317,8 @@ class StorageAdapter {
      */
     async loadProjectTaskIndex(projectId) {
         const keys = this.getKeys();
-        return await this.load(keys.projectTaskIndex(projectId)) || [];
+        const legacyKeys = this.getLegacyKeys();
+        return await this.loadSharedWithFallback(keys.projectTaskIndex(projectId), legacyKeys.projectTaskIndex(projectId), false, []);
     }
 
     /**
@@ -1797,6 +1836,37 @@ class ProjectService {
         return code;
     }
 
+    buildInviteToken(project) {
+        const payload = {
+            projectId: project.id,
+            inviteCode: project.inviteCode,
+            ts: Date.now()
+        };
+        return `TCJOIN:${btoa(unescape(encodeURIComponent(JSON.stringify(payload))))}`;
+    }
+
+    parseInviteInput(inviteInput) {
+        const raw = String(inviteInput || '').trim();
+        const upper = raw.toUpperCase();
+
+        if (upper.startsWith('TCJOIN:')) {
+            try {
+                const decoded = decodeURIComponent(escape(atob(raw.slice(7))));
+                const payload = JSON.parse(decoded);
+                return {
+                    raw,
+                    inviteCode: String(payload.inviteCode || '').trim().toUpperCase(),
+                    projectId: payload.projectId || null,
+                    payload
+                };
+            } catch (error) {
+                throw new TCErrors.InviteError('邀请口令无效');
+            }
+        }
+
+        return { raw, inviteCode: upper, projectId: null, payload: null };
+    }
+
     /**
      * 创建项目
      * @param {Object} input - 项目输入
@@ -1967,40 +2037,52 @@ class ProjectService {
      * @param {string} userId - 用户 ID
      * @returns {Promise<Object>} 加入的项目
      */
-    async joinProjectByInviteCode(inviteCode, userId) {
+    async joinProjectByInviteCode(inviteInput, userId) {
         const C = window.TCConstants;
+        const parsedInvite = this.parseInviteInput(inviteInput);
+        const inviteCode = parsedInvite.inviteCode;
 
-        // 读取邀请码索引
-        const inviteData = await this.storage.loadInviteCode(inviteCode);
-
-        if (!inviteData) {
+        if (!inviteCode) {
             throw new TCErrors.InviteError('邀请码无效');
         }
 
-        if (inviteData.status !== 'active') {
-            throw new TCErrors.InviteError('邀请码已失效');
+        let inviteData = await this.storage.loadInviteCode(inviteCode);
+        let project = null;
+
+        if (inviteData) {
+            if (inviteData.status !== 'active') {
+                throw new TCErrors.InviteError('邀请码已失效');
+            }
+
+            if (inviteData.expiresAt && inviteData.expiresAt < Date.now()) {
+                throw new TCErrors.InviteError('邀请码已过期');
+            }
+
+            if (inviteData.maxUses && inviteData.usedCount >= inviteData.maxUses) {
+                throw new TCErrors.InviteError('邀请码使用次数已达上限');
+            }
+
+            project = await this.storage.loadProject(inviteData.projectId);
         }
 
-        if (inviteData.expiresAt && inviteData.expiresAt < Date.now()) {
-            throw new TCErrors.InviteError('邀请码已过期');
+        if (!project && parsedInvite.projectId) {
+            project = await this.storage.loadProject(parsedInvite.projectId);
+            if (!project) {
+                throw new TCErrors.InviteError('项目不存在');
+            }
+            if (project.inviteCode !== inviteCode) {
+                throw new TCErrors.InviteError('邀请码无效');
+            }
         }
 
-        if (inviteData.maxUses && inviteData.usedCount >= inviteData.maxUses) {
-            throw new TCErrors.InviteError('邀请码使用次数已达上限');
-        }
-
-        // 获取项目
-        const project = await this.storage.loadProject(inviteData.projectId);
         if (!project) {
-            throw new TCErrors.InviteError('项目不存在');
+            throw new TCErrors.InviteError('邀请码无效');
         }
 
-        // 检查是否已经是成员
         if (project.members.some(m => m.userId === userId)) {
             throw new TCErrors.InviteError('你已经是该项目的成员');
         }
 
-        // 添加成员
         project.members.push({
             userId: userId,
             role: C.PROJECT_ROLE.MEMBER,
@@ -2010,14 +2092,13 @@ class ProjectService {
         project.updatedAt = Date.now();
         project.version = (project.version || 1) + 1;
 
-        // 更新邀请码使用次数
-        inviteData.usedCount++;
-        await this.storage.saveInviteCode(inviteCode, inviteData);
+        if (inviteData) {
+            inviteData.usedCount = (inviteData.usedCount || 0) + 1;
+            await this.storage.saveInviteCode(inviteCode, inviteData);
+        }
 
-        // 保存项目
         await this.storage.saveProject(project);
 
-        // 触发事件
         this.eventBus.emit(C.EVENTS.MEMBER_JOINED, {
             projectId: project.id,
             userId: userId
@@ -2243,6 +2324,33 @@ class TaskService {
      * @param {string} userId - 创建者 ID
      * @returns {Promise<Object>} 创建的任务
      */
+    normalizeChecklist(items = []) {
+        return (items || [])
+            .map((item, index) => {
+                if (typeof item === 'string') {
+                    return {
+                        id: `check_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
+                        text: item.trim(),
+                        done: false,
+                        createdAt: Date.now()
+                    };
+                }
+                return {
+                    id: item.id || `check_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
+                    text: String(item.text || '').trim(),
+                    done: Boolean(item.done),
+                    createdAt: item.createdAt || Date.now()
+                };
+            })
+            .filter(item => item.text);
+    }
+
+    calcChecklistProgress(items = []) {
+        if (!items || items.length === 0) return 0;
+        const doneCount = items.filter(item => item.done).length;
+        return Math.round((doneCount / items.length) * 100);
+    }
+
     async createTask(input, userId) {
         const C = window.TCConstants;
         const now = Date.now();
@@ -2265,6 +2373,8 @@ class TaskService {
             ? await this.crypto.encrypt(input.description)
             : '';
 
+        const checklist = this.normalizeChecklist(input.checklist || []);
+
         const task = {
             id: this.generateId('TASK'),
             projectId: input.projectId,
@@ -2285,11 +2395,12 @@ class TaskService {
             helpStatus: input.helpStatus || (input.helpRequested ? 'open' : 'none'),
             helpMessage: input.helpMessage || '',
             helperIds: input.helperIds || [],
+            checklist,
             startDate: input.startDate || null,
             dueDate: input.dueDate || null,
             completedAt: null,
-            progress: 0,
-            progressMode: 'manual',
+            progress: checklist.length > 0 ? this.calcChecklistProgress(checklist) : 0,
+            progressMode: checklist.length > 0 ? 'checklist' : 'manual',
             parentTaskId: input.parentTaskId || null,
             subTaskIds: [],
             dependsOn: input.dependsOn || [],
@@ -2468,6 +2579,15 @@ class TaskService {
             activities.push({ field: 'tags', time: now });
         }
 
+        if (updates.checklist !== undefined) {
+            task.checklist = this.normalizeChecklist(updates.checklist);
+            task.progressMode = task.checklist.length > 0 ? 'checklist' : task.progressMode;
+            if (task.checklist.length > 0) {
+                task.progress = this.calcChecklistProgress(task.checklist);
+            }
+            activities.push({ field: 'checklist', time: now });
+        }
+
         if (updates.helpRequested !== undefined) {
             task.helpRequested = Boolean(updates.helpRequested);
             if (!task.helpRequested && updates.helpStatus === undefined) {
@@ -2492,6 +2612,7 @@ class TaskService {
         }
 
         if (updates.progress !== undefined) {
+            task.progressMode = 'manual';
             task.progress = Math.min(100, Math.max(0, updates.progress));
         }
 
@@ -5072,11 +5193,13 @@ class Sidebar {
                     <div class="tc-invite-code-display">
                         <div class="tc-invite-label">邀请码</div>
                         <div class="tc-invite-code">${project.inviteCode}</div>
-                        <div class="tc-invite-hint">将此邀请码分享给团队成员，他们可以通过此码加入项目</div>
+                        <div class="tc-invite-hint">建议直接复制下面的完整邀请口令，其他账号粘贴后可直接加入项目。</div>
+                        <textarea class="tc-form-textarea tc-invite-token-textarea" id="tc-invite-token" rows="3" readonly>${this.projectService.buildInviteToken(project)}</textarea>
                     </div>
                 </div>
                 <div class="tc-modal-footer">
-                    <button class="tc-btn tc-btn-secondary" id="tc-copy-invite-code">复制邀请码</button>
+                    <button class="tc-btn tc-btn-secondary" id="tc-copy-invite-code">复制邀请口令</button>
+                    <button class="tc-btn tc-btn-secondary" id="tc-copy-raw-invite-code">仅复制6位邀请码</button>
                     <button class="tc-btn tc-btn-primary tc-modal-cancel">完成</button>
                 </div>
             </div>
@@ -5088,14 +5211,25 @@ class Sidebar {
         inviteModal.querySelector('.tc-modal-close').addEventListener('click', () => inviteModal.remove());
         inviteModal.querySelector('.tc-modal-cancel').addEventListener('click', () => inviteModal.remove());
 
-        // 复制邀请码
+        // 复制邀请口令
         inviteModal.querySelector('#tc-copy-invite-code').addEventListener('click', () => {
-            navigator.clipboard.writeText(project.inviteCode).then(() => {
-                this.panel.api.ui.showToast('邀请码已复制到剪贴板', 'success');
+            navigator.clipboard.writeText(this.projectService.buildInviteToken(project)).then(() => {
+                this.panel.api.ui.showToast('邀请口令已复制到剪贴板', 'success');
             }).catch(() => {
                 this.panel.api.ui.showToast('复制失败，请手动复制', 'error');
             });
         });
+
+        const copyRawBtn = inviteModal.querySelector('#tc-copy-raw-invite-code');
+        if (copyRawBtn) {
+            copyRawBtn.addEventListener('click', () => {
+                navigator.clipboard.writeText(project.inviteCode).then(() => {
+                    this.panel.api.ui.showToast('6位邀请码已复制', 'success');
+                }).catch(() => {
+                    this.panel.api.ui.showToast('复制失败，请手动复制', 'error');
+                });
+            });
+        }
     }
 
     /**
@@ -5112,13 +5246,13 @@ class Sidebar {
                 </div>
                 <div class="tc-modal-body">
                     <div class="tc-form-group">
-                        <label class="tc-form-label">邀请码 *</label>
-                        <input type="text" class="tc-form-input" id="tc-invite-code" 
-                               placeholder="输入6位邀请码" maxlength="6" 
-                               style="text-transform: uppercase; letter-spacing: 4px; font-size: 18px; text-align: center;">
+                        <label class="tc-form-label">邀请码 / 邀请口令 *</label>
+                        <textarea class="tc-form-textarea" id="tc-invite-code" 
+                               placeholder="粘贴 6 位邀请码，或完整邀请口令" rows="3"
+                               style="text-transform: uppercase;"></textarea>
                     </div>
                     <div class="tc-form-hint">
-                        邀请码由项目管理员提供，通常为6位字母和数字组合
+                        支持 6 位邀请码，也支持直接粘贴完整邀请口令
                     </div>
                 </div>
                 <div class="tc-modal-footer">
@@ -5136,10 +5270,10 @@ class Sidebar {
 
         // 确认加入
         modal.querySelector('#tc-confirm-join').addEventListener('click', async () => {
-            const inviteCode = document.getElementById('tc-invite-code').value.trim().toUpperCase();
+            const inviteCode = document.getElementById('tc-invite-code').value.trim();
 
-            if (!inviteCode || inviteCode.length !== 6) {
-                this.panel.api.ui.showToast('请输入6位邀请码', 'warning');
+            if (!inviteCode) {
+                this.panel.api.ui.showToast('请输入邀请码或邀请口令', 'warning');
                 return;
             }
 
@@ -5623,6 +5757,20 @@ class TaskBoard {
                                placeholder="例如：前端, 优化, 紧急">
                     </div>
                     <div class="tc-form-group">
+                        <label class="tc-form-label">任务清单（复选项）</label>
+                        <div class="tc-checklist-builder">
+                            <div class="tc-checklist-builder-list" id="tc-checklist-builder-list">
+                                <div class="tc-checklist-builder-row">
+                                    <input type="checkbox" disabled>
+                                    <input type="text" class="tc-form-input tc-checklist-input" placeholder="输入一个清单项，例如：联调接口返回结构">
+                                    <button type="button" class="tc-btn tc-btn-secondary tc-btn-sm tc-checklist-remove">删除</button>
+                                </div>
+                            </div>
+                            <button type="button" class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-add-checklist-item">+ 添加清单项</button>
+                            <div class="tc-form-help">创建后会显示为可勾选复选框，适合拆分执行步骤。</div>
+                        </div>
+                    </div>
+                    <div class="tc-form-group">
                         <label class="tc-form-label">求助说明（可选）</label>
                         <textarea class="tc-form-textarea" id="tc-task-help-message" 
                                   placeholder="如果这项任务需要协作支持，可写清阻塞点与求助背景" rows="3"></textarea>
@@ -5638,6 +5786,35 @@ class TaskBoard {
 
         document.body.appendChild(modal);
 
+        const checklistList = modal.querySelector('#tc-checklist-builder-list');
+        const bindChecklistRow = (row) => {
+            row.querySelector('.tc-checklist-remove').addEventListener('click', () => {
+                if (checklistList.children.length === 1) {
+                    const input = row.querySelector('.tc-checklist-input');
+                    if (input) input.value = '';
+                    return;
+                }
+                row.remove();
+            });
+        };
+
+        checklistList.querySelectorAll('.tc-checklist-builder-row').forEach(bindChecklistRow);
+        const addChecklistBtn = modal.querySelector('#tc-add-checklist-item');
+        if (addChecklistBtn) {
+            addChecklistBtn.addEventListener('click', () => {
+                const row = document.createElement('div');
+                row.className = 'tc-checklist-builder-row';
+                row.innerHTML = `
+                    <input type="checkbox" disabled>
+                    <input type="text" class="tc-form-input tc-checklist-input" placeholder="输入一个清单项，例如：联调接口返回结构">
+                    <button type="button" class="tc-btn tc-btn-secondary tc-btn-sm tc-checklist-remove">删除</button>
+                `;
+                checklistList.appendChild(row);
+                bindChecklistRow(row);
+                row.querySelector('.tc-checklist-input')?.focus();
+            });
+        }
+
         // 关闭按钮
         modal.querySelector('.tc-modal-close').addEventListener('click', () => modal.remove());
         modal.querySelector('.tc-modal-cancel').addEventListener('click', () => modal.remove());
@@ -5652,6 +5829,9 @@ class TaskBoard {
             const visibility = document.getElementById('tc-task-visibility').value;
             const helpMessage = document.getElementById('tc-task-help-message').value.trim();
             const helpRequested = document.getElementById('tc-task-help-requested').checked;
+            const checklist = Array.from(modal.querySelectorAll('.tc-checklist-input'))
+                .map(input => ({ text: input.value.trim(), done: false }))
+                .filter(item => item.text);
 
             // 获取选中的负责人
             const assigneeCheckboxes = document.querySelectorAll('.tc-assignee-checkbox:checked');
@@ -5676,7 +5856,8 @@ class TaskBoard {
                     visibility,
                     helpRequested,
                     helpStatus: helpRequested ? 'open' : 'none',
-                    helpMessage
+                    helpMessage,
+                    checklist
                 }, this.currentUserId);
 
                 this.panel.api.ui.showToast('任务创建成功', 'success');
@@ -6454,6 +6635,35 @@ class TaskDetail {
     }
 
     /**
+     * 显示任务详情
+     * @param {Object|string} taskOrId - 任务对象或任务 ID
+     * @param {string} userId - 当前用户 ID
+     */
+    async show(taskOrId, userId) {
+        this.currentUserId = userId || this.currentUserId;
+
+        if (!taskOrId) {
+            throw new Error('缺少任务信息');
+        }
+
+        if (typeof taskOrId === 'string') {
+            this.currentTask = await this.taskService.getTask(taskOrId, this.currentUserId);
+        } else {
+            this.currentTask = taskOrId;
+        }
+
+        if (!this.currentTask) {
+            throw new Error('任务不存在或无权限访问');
+        }
+
+        this.currentProjectId = this.currentTask.projectId;
+        await this.loadProjectMembers();
+        await this.loadComments();
+        this.render();
+        this.bindEvents();
+    }
+
+    /**
      * 渲染详情
      */
     render() {
@@ -6555,6 +6765,23 @@ class TaskDetail {
                         <div class="tc-section-title">任务描述</div>
                         <div class="tc-description">
                             ${task.description ? this.markdown.renderSafe(task.description) : '<span class="tc-placeholder">暂无描述</span>'}
+                        </div>
+                    </div>
+
+                    <div class="tc-detail-section">
+                        <div class="tc-section-title">任务清单</div>
+                        <div class="tc-task-checklist" id="tc-task-checklist">
+                            ${(task.checklist && task.checklist.length > 0) ? task.checklist.map(item => `
+                                <label class="tc-task-checklist-item ${item.done ? 'done' : ''}" data-checklist-id="${item.id}">
+                                    <input type="checkbox" class="tc-task-checklist-toggle" data-checklist-id="${item.id}" ${item.done ? 'checked' : ''}>
+                                    <span class="tc-task-checklist-text">${window.TCUtils.escapeHtml(item.text)}</span>
+                                    <button type="button" class="tc-action-btn tc-task-checklist-delete" data-checklist-id="${item.id}">删除</button>
+                                </label>
+                            `).join('') : '<div class="tc-placeholder">暂无清单项</div>'}
+                        </div>
+                        <div class="tc-task-checklist-create">
+                            <input type="text" class="tc-form-input" id="tc-new-checklist-text" placeholder="添加新的清单项，例如：补充接口文档">
+                            <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-add-checklist-btn">添加</button>
                         </div>
                     </div>
 
@@ -6686,6 +6913,33 @@ class TaskDetail {
         const resolveHelpBtn = document.getElementById('tc-resolve-help-btn');
         if (resolveHelpBtn) {
             resolveHelpBtn.addEventListener('click', () => this.resolveHelp());
+        }
+
+        document.querySelectorAll('.tc-task-checklist-toggle').forEach(toggle => {
+            toggle.addEventListener('change', () => this.toggleChecklistItem(toggle.dataset.checklistId, toggle.checked));
+        });
+
+        document.querySelectorAll('.tc-task-checklist-delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.removeChecklistItem(btn.dataset.checklistId);
+            });
+        });
+
+        const addChecklistBtn = document.getElementById('tc-add-checklist-btn');
+        if (addChecklistBtn) {
+            addChecklistBtn.addEventListener('click', () => this.addChecklistItem());
+        }
+
+        const newChecklistInput = document.getElementById('tc-new-checklist-text');
+        if (newChecklistInput) {
+            newChecklistInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.addChecklistItem();
+                }
+            });
         }
 
         // 发送评论按钮
@@ -6941,6 +7195,46 @@ class TaskDetail {
             this.bindEvents();
         } catch (error) {
             this.panel.api.ui.showToast('更新状态失败: ' + error.message, 'error');
+        }
+    }
+
+    async toggleChecklistItem(itemId, done) {
+        const checklist = (this.currentTask.checklist || []).map(item =>
+            item.id === itemId ? { ...item, done } : item
+        );
+        await this.saveChecklist(checklist, done ? '清单项已完成' : '清单项已取消完成');
+    }
+
+    async addChecklistItem() {
+        const input = document.getElementById('tc-new-checklist-text');
+        const text = input?.value?.trim();
+        if (!text) {
+            this.panel.api.ui.showToast('请输入清单项内容', 'warning');
+            return;
+        }
+
+        const checklist = [...(this.currentTask.checklist || []), {
+            id: `check_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            text,
+            done: false,
+            createdAt: Date.now()
+        }];
+        await this.saveChecklist(checklist, '清单项已添加');
+    }
+
+    async removeChecklistItem(itemId) {
+        const checklist = (this.currentTask.checklist || []).filter(item => item.id !== itemId);
+        await this.saveChecklist(checklist, '清单项已删除');
+    }
+
+    async saveChecklist(checklist, successMessage) {
+        try {
+            this.currentTask = await this.taskService.updateTask(this.currentTask.id, { checklist }, this.currentUserId);
+            this.panel.api.ui.showToast(successMessage, 'success');
+            this.render();
+            this.bindEvents();
+        } catch (error) {
+            this.panel.api.ui.showToast('更新清单失败: ' + error.message, 'error');
         }
     }
 
@@ -8878,7 +9172,7 @@ class ProjectSettingsView {
                                 <span class="tc-invite-code-text">${project.inviteCode || '未生成'}</span>
                             </div>
                             <div class="tc-invite-code-actions">
-                                <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-copy-invite">复制邀请码</button>
+                                <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-copy-invite">复制邀请口令</button>
                                 ${canEdit ? '<button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-regenerate-invite">重新生成</button>' : ''}
                             </div>
                         </div>
@@ -8990,8 +9284,9 @@ class ProjectSettingsView {
             return;
         }
 
-        navigator.clipboard.writeText(this.project.inviteCode).then(() => {
-            this.api.ui.showToast('邀请码已复制到剪贴板', 'success');
+        const inviteToken = this.projectService.buildInviteToken(this.project);
+        navigator.clipboard.writeText(inviteToken).then(() => {
+            this.api.ui.showToast('邀请口令已复制到剪贴板', 'success');
         }).catch(() => {
             this.api.ui.showToast('复制失败，请手动复制', 'error');
         });
