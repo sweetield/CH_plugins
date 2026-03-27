@@ -72,7 +72,10 @@ const EVENTS = {
     ATTACHMENT_UPLOADED: 'attachment.uploaded',
     PLAN_SUBMITTED: 'plan.submitted',
     PROJECT_EXPORTED: 'project.exported',
-    NOTIFICATION_RECEIVED: 'notification.received'
+    NOTIFICATION_RECEIVED: 'notification.received',
+    HELP_REQUESTED: 'help.requested',
+    HELP_CLAIMED: 'help.claimed',
+    HELP_RESOLVED: 'help.resolved'
 };
 
 // 通知类型
@@ -83,7 +86,10 @@ const NOTIFICATION_TYPE = {
     COMMENT_MENTION: 'comment_mention',
     COMMENT_REPLY: 'comment_reply',
     PLAN_SUBMISSION: 'plan_submission',
-    PROJECT_INVITED: 'project_invited'
+    PROJECT_INVITED: 'project_invited',
+    HELP_REQUESTED: 'help_requested',
+    HELP_CLAIMED: 'help_claimed',
+    HELP_RESOLVED: 'help_resolved'
 };
 
 // 学习计划模板类型
@@ -122,7 +128,7 @@ const THREAD_STATUS = {
 };
 
 // Schema 版本
-const SCHEMA_VERSION = '3.0.0';
+const SCHEMA_VERSION = '3.1.0';
 
 // 导出常量
 window.TCConstants = {
@@ -1765,6 +1771,7 @@ class ProjectService {
         this.permission = permissionService;
         this.indexManager = indexManager;
         this.eventBus = eventBus;
+        this.api = storage.api;
     }
 
     /**
@@ -2272,7 +2279,12 @@ class TaskService {
             assigneeIds: input.assigneeIds || [],
             watcherIds: [userId],
             visibility: input.visibility || project.defaultTaskVisibility || C.VISIBILITY.PROJECT,
+            taskType: input.taskType || 'task',
             tags: input.tags || [],
+            helpRequested: Boolean(input.helpRequested),
+            helpStatus: input.helpStatus || (input.helpRequested ? 'open' : 'none'),
+            helpMessage: input.helpMessage || '',
+            helperIds: input.helperIds || [],
             startDate: input.startDate || null,
             dueDate: input.dueDate || null,
             completedAt: null,
@@ -2446,9 +2458,37 @@ class TaskService {
             activities.push({ field: 'visibility', time: now });
         }
 
+        if (updates.taskType !== undefined) {
+            task.taskType = updates.taskType;
+            activities.push({ field: 'taskType', time: now });
+        }
+
         if (updates.tags !== undefined) {
             task.tags = updates.tags;
             activities.push({ field: 'tags', time: now });
+        }
+
+        if (updates.helpRequested !== undefined) {
+            task.helpRequested = Boolean(updates.helpRequested);
+            if (!task.helpRequested && updates.helpStatus === undefined) {
+                task.helpStatus = 'none';
+            }
+            activities.push({ field: 'helpRequested', time: now });
+        }
+
+        if (updates.helpStatus !== undefined) {
+            task.helpStatus = updates.helpStatus;
+            activities.push({ field: 'helpStatus', time: now });
+        }
+
+        if (updates.helpMessage !== undefined) {
+            task.helpMessage = updates.helpMessage;
+            activities.push({ field: 'helpMessage', time: now });
+        }
+
+        if (updates.helperIds !== undefined) {
+            task.helperIds = updates.helperIds;
+            activities.push({ field: 'helperIds', time: now });
         }
 
         if (updates.progress !== undefined) {
@@ -2800,6 +2840,7 @@ class CommentService {
                     userId,
                     commentId: comment.id,
                     threadId: thread.id,
+                    projectId: input.projectId,
                     targetType: input.targetType,
                     targetId: input.targetId,
                     mentionedBy: input.authorId
@@ -3379,6 +3420,8 @@ class PlanService {
         this.eventBus.emit(window.TCConstants.EVENTS.PLAN_SUBMITTED, {
             planId,
             userId,
+            createdBy: plan.createdBy,
+            projectId: plan.projectId,
             submissionId: submitObj.id
         });
 
@@ -3595,6 +3638,53 @@ class NotificationService {
                 targetId: data.projectId
             });
         });
+
+        this.eventBus.on(C.EVENTS.HELP_REQUESTED, async (data) => {
+            if (!data.userIds || data.userIds.length === 0) return;
+            for (const userId of data.userIds) {
+                if (userId === data.requestedBy) continue;
+                await this.createNotification({
+                    userId,
+                    type: C.NOTIFICATION_TYPE.HELP_REQUESTED,
+                    title: '有成员发起了协作求助',
+                    content: data.taskTitle || '有任务需要支援',
+                    projectId: data.projectId,
+                    targetType: 'task',
+                    targetId: data.taskId
+                });
+            }
+        });
+
+        this.eventBus.on(C.EVENTS.HELP_CLAIMED, async (data) => {
+            if (!data.notifyUserIds || data.notifyUserIds.length === 0) return;
+            for (const userId of data.notifyUserIds) {
+                if (userId === data.helperId) continue;
+                await this.createNotification({
+                    userId,
+                    type: C.NOTIFICATION_TYPE.HELP_CLAIMED,
+                    title: '求助已有人响应',
+                    content: data.taskTitle || '求助任务已被认领',
+                    projectId: data.projectId,
+                    targetType: 'task',
+                    targetId: data.taskId
+                });
+            }
+        });
+
+        this.eventBus.on(C.EVENTS.HELP_RESOLVED, async (data) => {
+            if (!data.notifyUserIds || data.notifyUserIds.length === 0) return;
+            for (const userId of data.notifyUserIds) {
+                await this.createNotification({
+                    userId,
+                    type: C.NOTIFICATION_TYPE.HELP_RESOLVED,
+                    title: '协作求助已解决',
+                    content: data.taskTitle || '求助任务已标记解决',
+                    projectId: data.projectId,
+                    targetType: 'task',
+                    targetId: data.taskId
+                });
+            }
+        });
     }
 
     /**
@@ -3800,7 +3890,10 @@ class NotificationService {
             [C.NOTIFICATION_TYPE.COMMENT_MENTION]: '@提及',
             [C.NOTIFICATION_TYPE.COMMENT_REPLY]: '评论回复',
             [C.NOTIFICATION_TYPE.PLAN_SUBMISSION]: '成果提交',
-            [C.NOTIFICATION_TYPE.PROJECT_INVITED]: '项目邀请'
+            [C.NOTIFICATION_TYPE.PROJECT_INVITED]: '项目邀请',
+            [C.NOTIFICATION_TYPE.HELP_REQUESTED]: '协作求助',
+            [C.NOTIFICATION_TYPE.HELP_CLAIMED]: '已响应求助',
+            [C.NOTIFICATION_TYPE.HELP_RESOLVED]: '求助已解决'
         };
         return labels[type] || '通知';
     }
@@ -3819,7 +3912,10 @@ class NotificationService {
             [C.NOTIFICATION_TYPE.COMMENT_MENTION]: '@',
             [C.NOTIFICATION_TYPE.COMMENT_REPLY]: '💬',
             [C.NOTIFICATION_TYPE.PLAN_SUBMISSION]: '📝',
-            [C.NOTIFICATION_TYPE.PROJECT_INVITED]: '👥'
+            [C.NOTIFICATION_TYPE.PROJECT_INVITED]: '👥',
+            [C.NOTIFICATION_TYPE.HELP_REQUESTED]: '🆘',
+            [C.NOTIFICATION_TYPE.HELP_CLAIMED]: '🤝',
+            [C.NOTIFICATION_TYPE.HELP_RESOLVED]: '✅'
         };
         return icons[type] || '🔔';
     }
@@ -4488,6 +4584,13 @@ class Panel {
         document.getElementById('tc-close-panel').addEventListener('click', () => {
             this.close();
         });
+
+        this.handleKeydown = (e) => {
+            if (e.key === 'Escape' && this.isOpen) {
+                this.close();
+            }
+        };
+        document.addEventListener('keydown', this.handleKeydown);
     }
 
     /**
@@ -4496,6 +4599,8 @@ class Panel {
     open() {
         if (this.panel) {
             this.panel.classList.add('open');
+            document.documentElement.classList.add('tc-collab-open');
+            document.body.classList.add('tc-collab-open');
             this.isOpen = true;
         }
     }
@@ -4506,6 +4611,8 @@ class Panel {
     close() {
         if (this.panel) {
             this.panel.classList.remove('open');
+            document.documentElement.classList.remove('tc-collab-open');
+            document.body.classList.remove('tc-collab-open');
             this.isOpen = false;
         }
     }
@@ -4598,6 +4705,11 @@ class Panel {
      * 销毁面板
      */
     destroy() {
+        document.documentElement.classList.remove('tc-collab-open');
+        document.body.classList.remove('tc-collab-open');
+        if (this.handleKeydown) {
+            document.removeEventListener('keydown', this.handleKeydown);
+        }
         if (this.panel) {
             this.panel.remove();
             this.panel = null;
@@ -4669,9 +4781,13 @@ class Sidebar {
                 <div class="tc-sidebar-title">模块</div>
                 <div class="tc-nav-list">
                     <div class="tc-nav-item active" data-view="tasks">
-                        <span class="tc-nav-icon">📋</span>
-                        <span class="tc-nav-label">任务中心</span>
+                        <span class="tc-nav-icon">✅</span>
+                        <span class="tc-nav-label">协作清单</span>
                         <span class="tc-nav-badge" id="tc-task-count">0</span>
+                    </div>
+                    <div class="tc-nav-item" data-view="help-center">
+                        <span class="tc-nav-icon">🆘</span>
+                        <span class="tc-nav-label">求助中心</span>
                     </div>
                     <div class="tc-nav-item" data-view="plans">
                         <span class="tc-nav-icon">📚</span>
@@ -5506,6 +5622,12 @@ class TaskBoard {
                         <input type="text" class="tc-form-input" id="tc-task-tags" 
                                placeholder="例如：前端, 优化, 紧急">
                     </div>
+                    <div class="tc-form-group">
+                        <label class="tc-form-label">求助说明（可选）</label>
+                        <textarea class="tc-form-textarea" id="tc-task-help-message" 
+                                  placeholder="如果这项任务需要协作支持，可写清阻塞点与求助背景" rows="3"></textarea>
+                    </div>
+                    <label class="tc-checkbox-line"><input type="checkbox" id="tc-task-help-requested"> <span>创建后立即进入求助状态</span></label>
                 </div>
                 <div class="tc-modal-footer">
                     <button class="tc-btn tc-btn-secondary tc-modal-cancel">取消</button>
@@ -5528,6 +5650,8 @@ class TaskBoard {
             const dueDate = document.getElementById('tc-task-due-date').value;
             const tagsStr = document.getElementById('tc-task-tags').value.trim();
             const visibility = document.getElementById('tc-task-visibility').value;
+            const helpMessage = document.getElementById('tc-task-help-message').value.trim();
+            const helpRequested = document.getElementById('tc-task-help-requested').checked;
 
             // 获取选中的负责人
             const assigneeCheckboxes = document.querySelectorAll('.tc-assignee-checkbox:checked');
@@ -5549,7 +5673,10 @@ class TaskBoard {
                     dueDate: dueDate ? new Date(dueDate).getTime() : null,
                     tags,
                     assigneeIds,
-                    visibility
+                    visibility,
+                    helpRequested,
+                    helpStatus: helpRequested ? 'open' : 'none',
+                    helpMessage
                 }, this.currentUserId);
 
                 this.panel.api.ui.showToast('任务创建成功', 'success');
@@ -5609,123 +5736,152 @@ window.TCTaskBoard = TaskBoard;
  */
 
 class TaskList {
-    constructor(panel, taskService, indexManager, eventBus) {
+    constructor(panel, taskService, indexManager, eventBus, projectService) {
         this.panel = panel;
         this.taskService = taskService;
         this.indexManager = indexManager;
         this.eventBus = eventBus;
+        this.projectService = projectService;
         this.currentProjectId = null;
         this.currentUserId = null;
         this.tasks = [];
-        this.filters = {};
+        this.allTasks = [];
+        this.projectMembers = [];
+        this.filters = { keyword: '', status: '', priority: '', helpOnly: false, mineOnly: false };
         this.sortBy = 'updatedAt';
         this.sortOrder = 'desc';
     }
 
-    /**
-     * 初始化
-     * @param {string} projectId - 项目 ID
-     * @param {string} userId - 用户 ID
-     */
     async init(projectId, userId) {
         this.currentProjectId = projectId;
         this.currentUserId = userId;
+        await this.loadProjectMembers();
         await this.loadTasks();
         this.render();
         this.bindEvents();
     }
 
-    /**
-     * 加载任务
-     */
+    async loadProjectMembers() {
+        if (!this.currentProjectId) return;
+        try {
+            const project = await this.projectService.getProject(this.currentProjectId);
+            this.projectMembers = project?.members || [];
+        } catch (error) {
+            console.error('[TaskList] 加载项目成员失败:', error);
+            this.projectMembers = [];
+        }
+    }
+
     async loadTasks() {
         if (!this.currentProjectId) return;
-        this.tasks = await this.taskService.getProjectTasks(this.currentProjectId, this.currentUserId);
+        this.allTasks = await this.taskService.getProjectTasks(this.currentProjectId, this.currentUserId);
         this.applyFilters();
     }
 
-    /**
-     * 应用过滤和排序
-     */
     applyFilters() {
-        let filtered = [...this.tasks];
+        let filtered = [...this.allTasks];
 
-        // 状态过滤
         if (this.filters.status) {
             filtered = filtered.filter(t => t.status === this.filters.status);
         }
 
-        // 优先级过滤
         if (this.filters.priority) {
             filtered = filtered.filter(t => t.priority === this.filters.priority);
         }
 
-        // 关键词搜索
         if (this.filters.keyword) {
             const keyword = this.filters.keyword.toLowerCase();
             filtered = filtered.filter(t =>
                 t.title.toLowerCase().includes(keyword) ||
-                t.description.toLowerCase().includes(keyword)
+                t.description.toLowerCase().includes(keyword) ||
+                (t.helpMessage || '').toLowerCase().includes(keyword)
             );
         }
 
-        // 排序
+        if (this.filters.helpOnly) {
+            filtered = filtered.filter(t => t.helpRequested || (t.helpStatus && t.helpStatus !== 'none'));
+        }
+
+        if (this.filters.mineOnly) {
+            filtered = filtered.filter(t =>
+                t.createdBy === this.currentUserId ||
+                (t.assigneeIds || []).includes(this.currentUserId) ||
+                (t.helperIds || []).includes(this.currentUserId)
+            );
+        }
+
         filtered.sort((a, b) => {
             let aVal = a[this.sortBy];
             let bVal = b[this.sortBy];
 
             if (this.sortBy === 'priority') {
-                const priorityOrder = { 'urgent': 4, 'high': 3, 'medium': 2, 'low': 1 };
+                const priorityOrder = { urgent: 4, high: 3, medium: 2, low: 1 };
                 aVal = priorityOrder[a.priority] || 0;
                 bVal = priorityOrder[b.priority] || 0;
             }
 
             if (this.sortOrder === 'asc') {
                 return aVal > bVal ? 1 : -1;
-            } else {
-                return aVal < bVal ? 1 : -1;
             }
+            return aVal < bVal ? 1 : -1;
         });
 
         this.tasks = filtered;
     }
 
-    /**
-     * 渲染列表
-     */
+    getStats() {
+        const now = Date.now();
+        return {
+            total: this.allTasks.length,
+            doing: this.allTasks.filter(t => t.status === 'doing').length,
+            review: this.allTasks.filter(t => t.status === 'review').length,
+            help: this.allTasks.filter(t => t.helpRequested || (t.helpStatus && t.helpStatus !== 'none')).length,
+            overdue: this.allTasks.filter(t => t.dueDate && t.dueDate < now && t.status !== 'done').length
+        };
+    }
+
     render() {
         const C = window.TCConstants;
+        const stats = this.getStats();
         const html = `
-            <div class="tc-task-list-view">
+            <div class="tc-task-list-view tc-team-list-view">
                 <div class="tc-list-header">
-                    <div class="tc-list-title">任务列表</div>
+                    <div>
+                        <div class="tc-list-title">协作清单</div>
+                        <div class="tc-list-subtitle">默认以列表方式管理团队开发任务、讨论和求助。</div>
+                    </div>
                     <div class="tc-list-actions">
-                        <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-add-task-btn">
-                            + 新建任务
-                        </button>
-                        <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-switch-view-btn">
-                            📊 看板视图
-                        </button>
+                        <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-add-task-btn">+ 新建任务</button>
+                        <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-add-help-task-btn">🆘 新建求助</button>
+                        <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-switch-view-btn">📊 看板视图</button>
                     </div>
                 </div>
-                
-                <div class="tc-list-filters">
-                    <input type="text" class="tc-search-input" id="tc-task-search" 
-                           placeholder="搜索任务...">
+
+                <div class="tc-team-stats">
+                    <div class="tc-stat-card"><span class="tc-stat-label">总任务</span><span class="tc-stat-value">${stats.total}</span></div>
+                    <div class="tc-stat-card"><span class="tc-stat-label">进行中</span><span class="tc-stat-value">${stats.doing}</span></div>
+                    <div class="tc-stat-card"><span class="tc-stat-label">待支援</span><span class="tc-stat-value">${stats.help}</span></div>
+                    <div class="tc-stat-card"><span class="tc-stat-label">已逾期</span><span class="tc-stat-value">${stats.overdue}</span></div>
+                </div>
+
+                <div class="tc-list-filters tc-team-filters">
+                    <input type="text" class="tc-search-input" id="tc-task-search" placeholder="搜索任务 / 评论上下文 / 求助说明..." value="${window.TCUtils.escapeHtml(this.filters.keyword || '')}">
                     <select class="tc-filter-select" id="tc-status-filter">
                         <option value="">全部状态</option>
-                        <option value="${C.TASK_STATUS.TODO}">待办</option>
-                        <option value="${C.TASK_STATUS.DOING}">进行中</option>
-                        <option value="${C.TASK_STATUS.REVIEW}">审核中</option>
-                        <option value="${C.TASK_STATUS.DONE}">已完成</option>
+                        <option value="${C.TASK_STATUS.TODO}" ${this.filters.status === C.TASK_STATUS.TODO ? 'selected' : ''}>待办</option>
+                        <option value="${C.TASK_STATUS.DOING}" ${this.filters.status === C.TASK_STATUS.DOING ? 'selected' : ''}>进行中</option>
+                        <option value="${C.TASK_STATUS.REVIEW}" ${this.filters.status === C.TASK_STATUS.REVIEW ? 'selected' : ''}>审核中</option>
+                        <option value="${C.TASK_STATUS.DONE}" ${this.filters.status === C.TASK_STATUS.DONE ? 'selected' : ''}>已完成</option>
                     </select>
                     <select class="tc-filter-select" id="tc-priority-filter">
                         <option value="">全部优先级</option>
-                        <option value="${C.TASK_PRIORITY.URGENT}">紧急</option>
-                        <option value="${C.TASK_PRIORITY.HIGH}">高</option>
-                        <option value="${C.TASK_PRIORITY.MEDIUM}">中</option>
-                        <option value="${C.TASK_PRIORITY.LOW}">低</option>
+                        <option value="${C.TASK_PRIORITY.URGENT}" ${this.filters.priority === C.TASK_PRIORITY.URGENT ? 'selected' : ''}>紧急</option>
+                        <option value="${C.TASK_PRIORITY.HIGH}" ${this.filters.priority === C.TASK_PRIORITY.HIGH ? 'selected' : ''}>高</option>
+                        <option value="${C.TASK_PRIORITY.MEDIUM}" ${this.filters.priority === C.TASK_PRIORITY.MEDIUM ? 'selected' : ''}>中</option>
+                        <option value="${C.TASK_PRIORITY.LOW}" ${this.filters.priority === C.TASK_PRIORITY.LOW ? 'selected' : ''}>低</option>
                     </select>
+                    <button class="tc-filter-chip ${this.filters.mineOnly ? 'active' : ''}" id="tc-filter-mine">我的任务</button>
+                    <button class="tc-filter-chip ${this.filters.helpOnly ? 'active' : ''}" id="tc-filter-help">仅看待支援</button>
                 </div>
 
                 <div class="tc-list-content">
@@ -5737,22 +5893,20 @@ class TaskList {
         this.panel.setContent(html);
     }
 
-    /**
-     * 渲染空状态
-     */
     renderEmpty() {
         return `
             <div class="tc-list-empty">
-                <div class="tc-empty-icon">📋</div>
-                <div class="tc-empty-text">暂无任务</div>
-                <button class="tc-btn tc-btn-primary" id="tc-add-task-btn-empty">创建第一个任务</button>
+                <div class="tc-empty-icon">🧩</div>
+                <div class="tc-empty-text">当前筛选下没有任务</div>
+                <div class="tc-empty-subtext">你可以新建开发任务，或者新建一个需要团队支援的求助项。</div>
+                <div class="tc-empty-inline-actions">
+                    <button class="tc-btn tc-btn-primary" id="tc-add-task-btn-empty">创建任务</button>
+                    <button class="tc-btn tc-btn-secondary" id="tc-add-help-task-btn-empty">新建求助</button>
+                </div>
             </div>
         `;
     }
 
-    /**
-     * 渲染任务项
-     */
     renderTaskItems() {
         const C = window.TCConstants;
         const statusLabels = {
@@ -5769,55 +5923,61 @@ class TaskList {
             [C.TASK_STATUS.DONE]: '#22c55e'
         };
 
-        const priorityColors = {
-            'low': '#6b7280',
-            'medium': '#3b82f6',
-            'high': '#f59e0b',
-            'urgent': '#ef4444'
-        };
+        const helpLabels = { none: '无', open: '待响应', claimed: '处理中', resolved: '已解决' };
 
         return `
-            <div class="tc-list-items">
-                ${this.tasks.map(task => `
-                    <div class="tc-list-item" data-task-id="${task.id}">
-                        <div class="tc-list-item-left">
-                            <div class="tc-task-status-dot" style="background: ${statusColors[task.status]}"></div>
-                            <div class="tc-task-info">
-                                <div class="tc-task-title">${window.TCUtils.escapeHtml(task.title)}</div>
-                                ${task.description ? `
-                                    <div class="tc-task-desc">${window.TCUtils.escapeHtml(window.TCUtils.truncateText(task.description, 80))}</div>
-                                ` : ''}
+            <div class="tc-list-items tc-team-list-items">
+                ${this.tasks.map(task => {
+                    const assignees = (task.assigneeIds || []).length > 0 ? task.assigneeIds.join(', ') : '未分配';
+                    const helpers = (task.helperIds || []).length > 0 ? task.helperIds.join(', ') : '暂无';
+                    const hasComments = task.threadIds && task.threadIds.length > 0;
+                    return `
+                        <div class="tc-list-item tc-team-task-item" data-task-id="${task.id}">
+                            <div class="tc-list-item-left">
+                                <div class="tc-task-status-dot" style="background: ${statusColors[task.status]}"></div>
+                                <div class="tc-task-info">
+                                    <div class="tc-task-title-row">
+                                        <div class="tc-task-title">${window.TCUtils.escapeHtml(task.title)}</div>
+                                        ${task.helpRequested ? `<span class="tc-help-badge ${task.helpStatus || 'open'}">🆘 ${helpLabels[task.helpStatus || 'open']}</span>` : ''}
+                                        ${task.taskType === 'help' ? '<span class="tc-subtle-badge">求助任务</span>' : '<span class="tc-subtle-badge">开发任务</span>'}
+                                    </div>
+                                    ${task.description ? `<div class="tc-task-desc">${window.TCUtils.escapeHtml(window.TCUtils.truncateText(task.description, 120))}</div>` : ''}
+                                    ${task.helpMessage ? `<div class="tc-help-summary">求助说明：${window.TCUtils.escapeHtml(window.TCUtils.truncateText(task.helpMessage, 120))}</div>` : ''}
+                                    <div class="tc-task-meta-row">
+                                        <span>负责人：${window.TCUtils.escapeHtml(assignees)}</span>
+                                        <span>协助人：${window.TCUtils.escapeHtml(helpers)}</span>
+                                        <span>更新于：${window.TCUtils.formatRelativeTime(task.updatedAt)}</span>
+                                        <span>${hasComments ? '💬 已有讨论' : '💬 暂无讨论'}</span>
+                                    </div>
+                                    ${task.tags && task.tags.length > 0 ? `<div class="tc-inline-tags">${task.tags.slice(0, 4).map(tag => `<span class="tc-tag">${window.TCUtils.escapeHtml(tag)}</span>`).join('')}</div>` : ''}
+                                </div>
+                            </div>
+                            <div class="tc-list-item-right tc-team-task-right">
+                                <span class="tc-priority-badge" style="background: ${task.priority === 'urgent' ? '#ef4444' : task.priority === 'high' ? '#f59e0b' : task.priority === 'medium' ? '#3b82f6' : '#6b7280'}">${window.TCUtils.getPriorityLabel(task.priority)}</span>
+                                ${task.dueDate ? `<span class="tc-due-date ${this.taskService.isOverdue(task) ? 'overdue' : ''}">${window.TCUtils.formatDate(task.dueDate)}</span>` : ''}
+                                <span class="tc-status-badge" style="background: ${statusColors[task.status]}">${statusLabels[task.status]}</span>
+                                <div class="tc-item-actions">
+                                    <button class="tc-mini-btn tc-open-task-btn" data-task-id="${task.id}">打开</button>
+                                    <button class="tc-mini-btn tc-open-comments-btn" data-task-id="${task.id}">评论</button>
+                                    ${task.helpRequested ? `<button class="tc-mini-btn tc-open-help-btn" data-task-id="${task.id}">跟进求助</button>` : `<button class="tc-mini-btn tc-request-help-btn" data-task-id="${task.id}">发起求助</button>`}
+                                </div>
                             </div>
                         </div>
-                        <div class="tc-list-item-right">
-                            <span class="tc-priority-badge" style="background: ${priorityColors[task.priority]}">
-                                ${window.TCUtils.getPriorityLabel(task.priority)}
-                            </span>
-                            ${task.dueDate ? `
-                                <span class="tc-due-date ${this.taskService.isOverdue(task) ? 'overdue' : ''}">
-                                    ${window.TCUtils.formatDate(task.dueDate)}
-                                </span>
-                            ` : ''}
-                            <span class="tc-status-badge" style="background: ${statusColors[task.status]}">
-                                ${statusLabels[task.status]}
-                            </span>
-                        </div>
-                    </div>
-                `).join('')}
+                    `;
+                }).join('')}
             </div>
         `;
     }
 
-    /**
-     * 绑定事件
-     */
     bindEvents() {
-        // 新建任务按钮
         document.querySelectorAll('#tc-add-task-btn, #tc-add-task-btn-empty').forEach(btn => {
-            btn.addEventListener('click', () => this.showCreateTaskModal());
+            btn.addEventListener('click', () => this.showCreateTaskModal(false));
         });
 
-        // 切换视图按钮
+        document.querySelectorAll('#tc-add-help-task-btn, #tc-add-help-task-btn-empty').forEach(btn => {
+            btn.addEventListener('click', () => this.showCreateTaskModal(true));
+        });
+
         const switchBtn = document.getElementById('tc-switch-view-btn');
         if (switchBtn) {
             switchBtn.addEventListener('click', () => {
@@ -5825,87 +5985,149 @@ class TaskList {
             });
         }
 
-        // 搜索框
         const searchInput = document.getElementById('tc-task-search');
         if (searchInput) {
             searchInput.addEventListener('input', window.TCUtils.debounce(async (e) => {
                 this.filters.keyword = e.target.value;
-                await this.loadTasks();
+                this.applyFilters();
                 this.render();
                 this.bindEvents();
-            }, 300));
+            }, 250));
         }
 
-        // 状态过滤
         const statusFilter = document.getElementById('tc-status-filter');
         if (statusFilter) {
             statusFilter.addEventListener('change', async (e) => {
-                this.filters.status = e.target.value || null;
-                await this.loadTasks();
+                this.filters.status = e.target.value || '';
+                this.applyFilters();
                 this.render();
                 this.bindEvents();
             });
         }
 
-        // 优先级过滤
         const priorityFilter = document.getElementById('tc-priority-filter');
         if (priorityFilter) {
             priorityFilter.addEventListener('change', async (e) => {
-                this.filters.priority = e.target.value || null;
-                await this.loadTasks();
+                this.filters.priority = e.target.value || '';
+                this.applyFilters();
                 this.render();
                 this.bindEvents();
             });
         }
 
-        // 任务项点击
+        const mineBtn = document.getElementById('tc-filter-mine');
+        if (mineBtn) {
+            mineBtn.addEventListener('click', () => {
+                this.filters.mineOnly = !this.filters.mineOnly;
+                this.applyFilters();
+                this.render();
+                this.bindEvents();
+            });
+        }
+
+        const helpBtn = document.getElementById('tc-filter-help');
+        if (helpBtn) {
+            helpBtn.addEventListener('click', () => {
+                this.filters.helpOnly = !this.filters.helpOnly;
+                this.applyFilters();
+                this.render();
+                this.bindEvents();
+            });
+        }
+
         document.querySelectorAll('.tc-list-item').forEach(item => {
             item.addEventListener('click', () => {
                 const taskId = item.dataset.taskId;
                 this.showTaskDetail(taskId);
             });
         });
+
+        document.querySelectorAll('.tc-open-task-btn, .tc-open-comments-btn, .tc-open-help-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.showTaskDetail(btn.dataset.taskId);
+            });
+        });
+
+        document.querySelectorAll('.tc-request-help-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await this.quickRequestHelp(btn.dataset.taskId);
+            });
+        });
     }
 
-    /**
-     * 显示创建任务对话框
-     */
-    showCreateTaskModal() {
+    showCreateTaskModal(asHelpTask = false) {
         const C = window.TCConstants;
         const modal = document.createElement('div');
         modal.className = 'tc-modal open';
+
+        const memberOptions = this.projectMembers.map(m => `
+            <label class="tc-checkbox-label">
+                <input type="checkbox" class="tc-assignee-checkbox" value="${m.userId}">
+                <span>${m.userId}</span>
+            </label>
+        `).join('');
+
         modal.innerHTML = `
-            <div class="tc-modal-content">
+            <div class="tc-modal-content tc-modal-content-lg">
                 <div class="tc-modal-header">
-                    <span class="tc-modal-title">新建任务</span>
+                    <span class="tc-modal-title">${asHelpTask ? '新建求助任务' : '新建任务'}</span>
                     <button class="tc-modal-close">×</button>
                 </div>
                 <div class="tc-modal-body">
                     <div class="tc-form-group">
                         <label class="tc-form-label">任务标题 *</label>
-                        <input type="text" class="tc-form-input" id="tc-task-title" 
-                               placeholder="输入任务标题" maxlength="100">
+                        <input type="text" class="tc-form-input" id="tc-task-title" placeholder="输入任务标题" maxlength="100">
                     </div>
                     <div class="tc-form-group">
                         <label class="tc-form-label">任务描述</label>
-                        <textarea class="tc-form-textarea" id="tc-task-description" 
-                                  placeholder="输入任务描述（支持Markdown）" rows="4"></textarea>
+                        <textarea class="tc-form-textarea" id="tc-task-description" placeholder="描述上下文、预期结果、背景信息（支持 Markdown）" rows="4"></textarea>
+                    </div>
+                    <div class="tc-form-group">
+                        <label class="tc-form-label">求助说明</label>
+                        <textarea class="tc-form-textarea" id="tc-task-help-message" placeholder="这个字段很适合写：卡在哪里、希望谁帮忙、需要什么输出" rows="3">${asHelpTask ? '当前任务需要团队支援，请补充上下文与阻塞点。' : ''}</textarea>
                     </div>
                     <div class="tc-form-row">
-                        <div class="tc-form-group" style="flex: 1;">
+                        <div class="tc-form-group" style="flex:1;">
                             <label class="tc-form-label">优先级</label>
                             <select class="tc-form-select" id="tc-task-priority">
                                 <option value="${C.TASK_PRIORITY.LOW}">低</option>
-                                <option value="${C.TASK_PRIORITY.MEDIUM}" selected>中</option>
-                                <option value="${C.TASK_PRIORITY.HIGH}">高</option>
+                                <option value="${C.TASK_PRIORITY.MEDIUM}" ${!asHelpTask ? 'selected' : ''}>中</option>
+                                <option value="${C.TASK_PRIORITY.HIGH}" ${asHelpTask ? 'selected' : ''}>高</option>
                                 <option value="${C.TASK_PRIORITY.URGENT}">紧急</option>
                             </select>
                         </div>
-                        <div class="tc-form-group" style="flex: 1;">
+                        <div class="tc-form-group" style="flex:1;">
                             <label class="tc-form-label">截止日期</label>
                             <input type="date" class="tc-form-input" id="tc-task-due-date">
                         </div>
                     </div>
+                    <div class="tc-form-group">
+                        <label class="tc-form-label">负责人（可多选）</label>
+                        <div class="tc-assignee-list" id="tc-task-assignees">${memberOptions || '<span class="tc-placeholder">暂无成员可选</span>'}</div>
+                    </div>
+                    <div class="tc-form-row">
+                        <div class="tc-form-group" style="flex:1;">
+                            <label class="tc-form-label">可见性</label>
+                            <select class="tc-form-select" id="tc-task-visibility">
+                                <option value="${C.VISIBILITY.PROJECT}">项目成员可见</option>
+                                <option value="${C.VISIBILITY.PRIVATE}">仅相关人员可见</option>
+                            </select>
+                        </div>
+                        <div class="tc-form-group" style="flex:1;">
+                            <label class="tc-form-label">任务类型</label>
+                            <select class="tc-form-select" id="tc-task-type">
+                                <option value="task" ${!asHelpTask ? 'selected' : ''}>开发任务</option>
+                                <option value="help" ${asHelpTask ? 'selected' : ''}>求助任务</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="tc-form-group">
+                        <label class="tc-form-label">标签（逗号分隔）</label>
+                        <input type="text" class="tc-form-input" id="tc-task-tags" placeholder="例如：前端, bug, 接口联调, blocker">
+                    </div>
+                    <label class="tc-checkbox-line"><input type="checkbox" id="tc-task-help-requested" ${asHelpTask ? 'checked' : ''}> <span>创建后立即进入求助状态</span></label>
                 </div>
                 <div class="tc-modal-footer">
                     <button class="tc-btn tc-btn-secondary tc-modal-cancel">取消</button>
@@ -5915,15 +6137,20 @@ class TaskList {
         `;
 
         document.body.appendChild(modal);
-
         modal.querySelector('.tc-modal-close').addEventListener('click', () => modal.remove());
         modal.querySelector('.tc-modal-cancel').addEventListener('click', () => modal.remove());
 
         modal.querySelector('#tc-confirm-create').addEventListener('click', async () => {
             const title = document.getElementById('tc-task-title').value.trim();
             const description = document.getElementById('tc-task-description').value.trim();
+            const helpMessage = document.getElementById('tc-task-help-message').value.trim();
             const priority = document.getElementById('tc-task-priority').value;
             const dueDate = document.getElementById('tc-task-due-date').value;
+            const visibility = document.getElementById('tc-task-visibility').value;
+            const taskType = document.getElementById('tc-task-type').value;
+            const helpRequested = document.getElementById('tc-task-help-requested').checked;
+            const tagsStr = document.getElementById('tc-task-tags').value.trim();
+            const assigneeIds = Array.from(document.querySelectorAll('.tc-assignee-checkbox:checked')).map(cb => cb.value);
 
             if (!title) {
                 this.panel.api.ui.showToast('请输入任务标题', 'warning');
@@ -5931,29 +6158,59 @@ class TaskList {
             }
 
             try {
-                await this.taskService.createTask({
+                const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+                const task = await this.taskService.createTask({
                     projectId: this.currentProjectId,
                     title,
                     description,
                     priority,
-                    dueDate: dueDate ? new Date(dueDate).getTime() : null
+                    dueDate: dueDate ? new Date(dueDate).getTime() : null,
+                    tags,
+                    assigneeIds,
+                    visibility,
+                    taskType,
+                    helpRequested,
+                    helpStatus: helpRequested ? 'open' : 'none',
+                    helpMessage
                 }, this.currentUserId);
 
-                this.panel.api.ui.showToast('任务创建成功', 'success');
+                this.panel.api.ui.showToast(asHelpTask ? '求助任务创建成功' : '任务创建成功', 'success');
                 modal.remove();
                 await this.loadTasks();
                 this.render();
                 this.bindEvents();
+
+                if (helpRequested) {
+                    this.eventBus.emit('task.detail', { taskId: task.id, task });
+                }
             } catch (error) {
+                console.error('创建任务失败:', error);
                 this.panel.api.ui.showToast('创建任务失败: ' + error.message, 'error');
             }
         });
     }
 
-    /**
-     * 显示任务详情
-     * @param {string} taskId - 任务 ID
-     */
+    async quickRequestHelp(taskId) {
+        try {
+            const task = await this.taskService.getTask(taskId, this.currentUserId);
+            if (!task) return;
+            const note = prompt('补充一下你需要什么协助（可留空）', task.helpMessage || '');
+            if (note === null) return;
+            await this.taskService.updateTask(taskId, {
+                helpRequested: true,
+                helpStatus: 'open',
+                helpMessage: note || task.helpMessage || '需要团队协助排查和推进。',
+                taskType: task.taskType || 'task'
+            }, this.currentUserId);
+            this.panel.api.ui.showToast('已标记为待支援', 'success');
+            await this.loadTasks();
+            this.render();
+            this.bindEvents();
+        } catch (error) {
+            this.panel.api.ui.showToast('发起求助失败: ' + error.message, 'error');
+        }
+    }
+
     async showTaskDetail(taskId) {
         try {
             const task = await this.taskService.getTask(taskId, this.currentUserId);
@@ -5967,37 +6224,188 @@ class TaskList {
         }
     }
 
-    /**
-     * 刷新
-     */
     async refresh() {
         await this.loadTasks();
         this.render();
         this.bindEvents();
     }
 
-    /**
-     * 销毁
-     */
-    destroy() {
-        // 清理
-    }
+    destroy() {}
 }
 
 // 导出
 window.TCTaskList = TaskList;
+
+/**
+ * 团队协作插件 - 求助中心
+ */
+
+class HelpCenter {
+    constructor(panel, taskService, projectService, eventBus) {
+        this.panel = panel;
+        this.taskService = taskService;
+        this.projectService = projectService;
+        this.eventBus = eventBus;
+        this.currentProjectId = null;
+        this.currentUserId = null;
+        this.tasks = [];
+    }
+
+    async init(projectId, userId) {
+        this.currentProjectId = projectId;
+        this.currentUserId = userId;
+        await this.loadTasks();
+        this.render();
+        this.bindEvents();
+    }
+
+    async loadTasks() {
+        const tasks = await this.taskService.getProjectTasks(this.currentProjectId, this.currentUserId);
+        this.tasks = tasks.filter(task => task.helpRequested || (task.helpStatus && task.helpStatus !== 'none'));
+        this.tasks.sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+
+    render() {
+        const html = `
+            <div class="tc-help-center-view">
+                <div class="tc-list-header">
+                    <div>
+                        <div class="tc-list-title">求助中心</div>
+                        <div class="tc-list-subtitle">集中查看卡点、阻塞、待认领事项，适合团队开发协作。</div>
+                    </div>
+                    <div class="tc-list-actions">
+                        <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-create-help-task">+ 发起求助</button>
+                        <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-back-to-list">返回清单</button>
+                    </div>
+                </div>
+                <div class="tc-help-center-content">
+                    ${this.tasks.length === 0 ? `
+                        <div class="tc-list-empty">
+                            <div class="tc-empty-icon">🤝</div>
+                            <div class="tc-empty-text">当前没有待支援任务</div>
+                            <div class="tc-empty-subtext">团队状态不错。你也可以主动发起一个新的求助项。</div>
+                        </div>
+                    ` : this.tasks.map(task => this.renderCard(task)).join('')}
+                </div>
+            </div>
+        `;
+        this.panel.setContent(html);
+    }
+
+    renderCard(task) {
+        const helpState = { open: '待响应', claimed: '处理中', resolved: '已解决', none: '无' }[task.helpStatus || 'open'];
+        const assignees = (task.assigneeIds || []).length ? task.assigneeIds.join(', ') : '未分配';
+        const helpers = (task.helperIds || []).length ? task.helperIds.join(', ') : '暂无';
+        return `
+            <div class="tc-help-card" data-task-id="${task.id}">
+                <div class="tc-help-card-top">
+                    <div>
+                        <div class="tc-help-card-title">${window.TCUtils.escapeHtml(task.title)}</div>
+                        <div class="tc-help-card-meta">创建者：${window.TCUtils.escapeHtml(task.createdBy)} · 负责人：${window.TCUtils.escapeHtml(assignees)}</div>
+                    </div>
+                    <span class="tc-help-badge ${task.helpStatus || 'open'}">${helpState}</span>
+                </div>
+                <div class="tc-help-card-body">
+                    <div class="tc-help-card-message">${window.TCUtils.escapeHtml(task.helpMessage || task.description || '未填写求助说明')}</div>
+                    <div class="tc-help-card-submeta">协助人：${window.TCUtils.escapeHtml(helpers)} · 更新于 ${window.TCUtils.formatRelativeTime(task.updatedAt)}</div>
+                </div>
+                <div class="tc-help-card-actions">
+                    <button class="tc-mini-btn tc-help-open-detail" data-task-id="${task.id}">查看详情</button>
+                    <button class="tc-mini-btn tc-help-claim" data-task-id="${task.id}">我来处理</button>
+                    <button class="tc-mini-btn tc-help-resolve" data-task-id="${task.id}">标记解决</button>
+                </div>
+            </div>
+        `;
+    }
+
+    bindEvents() {
+        const createBtn = document.getElementById('tc-create-help-task');
+        if (createBtn) {
+            createBtn.addEventListener('click', () => {
+                this.eventBus.emit('view.changed', { view: 'tasks', projectId: this.currentProjectId });
+                setTimeout(() => {
+                    const btn = document.getElementById('tc-add-help-task-btn');
+                    if (btn) btn.click();
+                }, 0);
+            });
+        }
+
+        const backBtn = document.getElementById('tc-back-to-list');
+        if (backBtn) {
+            backBtn.addEventListener('click', () => this.eventBus.emit('view.changed', { view: 'tasks', projectId: this.currentProjectId }));
+        }
+
+        document.querySelectorAll('.tc-help-open-detail').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const task = await this.taskService.getTask(btn.dataset.taskId, this.currentUserId);
+                if (task) this.eventBus.emit('task.detail', { taskId: task.id, task });
+            });
+        });
+
+        document.querySelectorAll('.tc-help-claim').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                await this.claimTask(btn.dataset.taskId);
+            });
+        });
+
+        document.querySelectorAll('.tc-help-resolve').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                await this.resolveTask(btn.dataset.taskId);
+            });
+        });
+    }
+
+    async claimTask(taskId) {
+        try {
+            const task = await this.taskService.getTask(taskId, this.currentUserId);
+            if (!task) return;
+            const helperIds = Array.from(new Set([...(task.helperIds || []), this.currentUserId]));
+            await this.taskService.updateTask(taskId, {
+                helpRequested: true,
+                helpStatus: 'claimed',
+                helperIds
+            }, this.currentUserId);
+            this.panel.api.ui.showToast('已认领该求助', 'success');
+            await this.loadTasks();
+            this.render();
+            this.bindEvents();
+        } catch (error) {
+            this.panel.api.ui.showToast('认领失败: ' + error.message, 'error');
+        }
+    }
+
+    async resolveTask(taskId) {
+        try {
+            await this.taskService.updateTask(taskId, {
+                helpRequested: false,
+                helpStatus: 'resolved'
+            }, this.currentUserId);
+            this.panel.api.ui.showToast('已标记为已解决', 'success');
+            await this.loadTasks();
+            this.render();
+            this.bindEvents();
+        } catch (error) {
+            this.panel.api.ui.showToast('操作失败: ' + error.message, 'error');
+        }
+    }
+}
+
+// 导出
+window.TCHelpCenter = HelpCenter;
+
 /**
  * 团队协作插件 - 任务详情面板
  */
 
 class TaskDetail {
-    constructor(panel, taskService, projectService, eventBus, commentService, markdownRenderer) {
+    constructor(panel, taskService, projectService, eventBus, commentService, markdownRenderer, notificationService) {
         this.panel = panel;
         this.taskService = taskService;
         this.projectService = projectService;
         this.eventBus = eventBus;
         this.commentService = commentService;
         this.markdown = markdownRenderer;
+        this.notificationService = notificationService;
         this.currentTask = null;
         this.currentUserId = null;
         this.comments = [];
@@ -6087,6 +6495,28 @@ class TaskDetail {
 
                 <div class="tc-detail-content">
                     <div class="tc-detail-title">${window.TCUtils.escapeHtml(task.title)}</div>
+
+                    <div class="tc-collab-banner ${task.helpRequested ? 'is-help' : ''}">
+                        <div>
+                            <div class="tc-collab-banner-title">${task.helpRequested ? '当前任务正在求助协作' : '当前任务可随时转为协作求助'}</div>
+                            <div class="tc-collab-banner-text">
+                                ${task.helpRequested
+                                    ? window.TCUtils.escapeHtml(task.helpMessage || '团队成员可在这里接手和跟进。')
+                                    : '适合把卡点、阻塞、联调问题写清楚，再通知团队一起处理。'}
+                            </div>
+                            <div class="tc-collab-banner-meta">
+                                <span>类型：${task.taskType === 'help' ? '求助任务' : '开发任务'}</span>
+                                <span>状态：${task.helpStatus || 'none'}</span>
+                                <span>协助人：${task.helperIds && task.helperIds.length > 0 ? task.helperIds.join(', ') : '暂无'}</span>
+                            </div>
+                        </div>
+                        <div class="tc-collab-banner-actions">
+                            ${task.helpRequested
+                                ? `<button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-claim-help-btn">我来处理</button>
+                                   <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-resolve-help-btn">标记解决</button>`
+                                : `<button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-request-help-btn">🆘 发起求助</button>`}
+                        </div>
+                    </div>
                     
                     <div class="tc-detail-meta">
                         <div class="tc-meta-item">
@@ -6243,6 +6673,21 @@ class TaskDetail {
             deleteBtn.addEventListener('click', () => this.confirmDelete());
         }
 
+        const requestHelpBtn = document.getElementById('tc-request-help-btn');
+        if (requestHelpBtn) {
+            requestHelpBtn.addEventListener('click', () => this.requestHelp());
+        }
+
+        const claimHelpBtn = document.getElementById('tc-claim-help-btn');
+        if (claimHelpBtn) {
+            claimHelpBtn.addEventListener('click', () => this.claimHelp());
+        }
+
+        const resolveHelpBtn = document.getElementById('tc-resolve-help-btn');
+        if (resolveHelpBtn) {
+            resolveHelpBtn.addEventListener('click', () => this.resolveHelp());
+        }
+
         // 发送评论按钮
         const sendBtn = document.getElementById('tc-send-comment');
         if (sendBtn) {
@@ -6365,6 +6810,118 @@ class TaskDetail {
             this.bindEvents();
         } catch (error) {
             this.panel.api.ui.showToast('删除评论失败: ' + error.message, 'error');
+        }
+    }
+
+    async requestHelp() {
+        const note = prompt('请补充求助说明，写清卡点和需要谁协助：', this.currentTask.helpMessage || this.currentTask.description || '');
+        if (note === null) return;
+
+        try {
+            this.currentTask = await this.taskService.updateTask(
+                this.currentTask.id,
+                {
+                    helpRequested: true,
+                    helpStatus: 'open',
+                    helpMessage: note || '需要团队协助推进。',
+                    taskType: this.currentTask.taskType || 'task'
+                },
+                this.currentUserId
+            );
+
+            await this.notifyHelpRequested(this.currentTask);
+            this.panel.api.ui.showToast('已发起团队求助', 'success');
+            this.render();
+            this.bindEvents();
+        } catch (error) {
+            this.panel.api.ui.showToast('发起求助失败: ' + error.message, 'error');
+        }
+    }
+
+    async claimHelp() {
+        try {
+            const helperIds = Array.from(new Set([...(this.currentTask.helperIds || []), this.currentUserId]));
+            this.currentTask = await this.taskService.updateTask(
+                this.currentTask.id,
+                {
+                    helpRequested: true,
+                    helpStatus: 'claimed',
+                    helperIds
+                },
+                this.currentUserId
+            );
+
+            await this.notifyHelpClaimed(this.currentTask);
+            this.panel.api.ui.showToast('已认领该求助', 'success');
+            this.render();
+            this.bindEvents();
+        } catch (error) {
+            this.panel.api.ui.showToast('认领失败: ' + error.message, 'error');
+        }
+    }
+
+    async resolveHelp() {
+        try {
+            this.currentTask = await this.taskService.updateTask(
+                this.currentTask.id,
+                {
+                    helpRequested: false,
+                    helpStatus: 'resolved'
+                },
+                this.currentUserId
+            );
+
+            await this.notifyHelpResolved(this.currentTask);
+            this.panel.api.ui.showToast('已将求助标记为解决', 'success');
+            this.render();
+            this.bindEvents();
+        } catch (error) {
+            this.panel.api.ui.showToast('更新失败: ' + error.message, 'error');
+        }
+    }
+
+    async notifyHelpRequested(task) {
+        try {
+            const project = await this.projectService.getProject(task.projectId);
+            const userIds = (project?.members || []).map(m => m.userId);
+            this.eventBus.emit(window.TCConstants.EVENTS.HELP_REQUESTED, {
+                projectId: task.projectId,
+                taskId: task.id,
+                taskTitle: task.title,
+                requestedBy: this.currentUserId,
+                userIds
+            });
+        } catch (error) {
+            console.warn('[TaskDetail] 求助通知发送失败:', error);
+        }
+    }
+
+    async notifyHelpClaimed(task) {
+        try {
+            const notifyUserIds = Array.from(new Set([task.createdBy, ...(task.assigneeIds || [])].filter(Boolean)));
+            this.eventBus.emit(window.TCConstants.EVENTS.HELP_CLAIMED, {
+                projectId: task.projectId,
+                taskId: task.id,
+                taskTitle: task.title,
+                helperId: this.currentUserId,
+                notifyUserIds
+            });
+        } catch (error) {
+            console.warn('[TaskDetail] 求助认领通知发送失败:', error);
+        }
+    }
+
+    async notifyHelpResolved(task) {
+        try {
+            const notifyUserIds = Array.from(new Set([task.createdBy, ...(task.assigneeIds || []), ...(task.helperIds || [])].filter(Boolean)));
+            this.eventBus.emit(window.TCConstants.EVENTS.HELP_RESOLVED, {
+                projectId: task.projectId,
+                taskId: task.id,
+                taskTitle: task.title,
+                notifyUserIds
+            });
+        } catch (error) {
+            console.warn('[TaskDetail] 求助解决通知发送失败:', error);
         }
     }
 
@@ -8776,6 +9333,7 @@ window.TCActivityView = ActivityView;
             this.inboxView = null;
             this.projectSettingsView = null;
             this.activityView = null;
+            this.helpCenter = null;
 
             // 按钮相关
             this.collabBtn = null;
@@ -8786,6 +9344,7 @@ window.TCActivityView = ActivityView;
             this.currentUserId = null;
             this.currentProjectId = null;
             this.currentView = 'tasks';
+            this.defaultTaskView = 'list';
         }
 
         /**
@@ -8983,6 +9542,7 @@ window.TCActivityView = ActivityView;
             const PlanView = window.TCPlanView;
             const InboxView = window.TCInboxView;
             const ProjectSettingsView = window.TCProjectSettingsView;
+            const HelpCenter = window.TCHelpCenter;
 
             // 创建面板
             this.panel = new Panel(this.api);
@@ -9014,7 +9574,8 @@ window.TCActivityView = ActivityView;
                 this.panel,
                 this.taskService,
                 this.indexManager,
-                this.eventBus
+                this.eventBus,
+                this.projectService
             );
 
             // 创建任务详情
@@ -9024,7 +9585,8 @@ window.TCActivityView = ActivityView;
                 this.projectService,
                 this.eventBus,
                 this.commentService,
-                this.markdownRenderer
+                this.markdownRenderer,
+                this.notificationService
             );
 
             // 创建评论输入框
@@ -9040,6 +9602,13 @@ window.TCActivityView = ActivityView;
                 this.panel,
                 this.commentService,
                 this.markdownRenderer,
+                this.eventBus
+            );
+
+            this.helpCenter = new HelpCenter(
+                this.panel,
+                this.taskService,
+                this.projectService,
                 this.eventBus
             );
 
@@ -9088,7 +9657,7 @@ window.TCActivityView = ActivityView;
             // 项目切换事件
             this.eventBus.on('project.changed', async (data) => {
                 this.currentProjectId = data.projectId;
-                await this.showTaskView();
+                await this.showTaskView('list');
             });
 
             // 视图切换事件
@@ -9096,11 +9665,14 @@ window.TCActivityView = ActivityView;
                 this.currentProjectId = data.projectId || this.currentProjectId;
                 switch (data.view) {
                     case 'tasks':
+                    case 'task-list':
+                        await this.showTaskView('list');
+                        break;
                     case 'task-board':
                         await this.showTaskView('board');
                         break;
-                    case 'task-list':
-                        await this.showTaskView('list');
+                    case 'help-center':
+                        await this.showHelpCenterView();
                         break;
                     case 'plans':
                         await this.showPlansView();
@@ -9161,6 +9733,14 @@ window.TCActivityView = ActivityView;
                 return;
             }
             await this.planView.init(this.currentProjectId, this.currentUserId);
+        }
+
+        async showHelpCenterView() {
+            if (!this.currentProjectId) {
+                this.panel.showEmpty('🆘', '请选择项目', '在左侧选择一个项目查看待支援事项');
+                return;
+            }
+            await this.helpCenter.init(this.currentProjectId, this.currentUserId);
         }
 
         /**
@@ -9294,7 +9874,7 @@ window.TCActivityView = ActivityView;
                 const projects = await this.projectService.getUserProjects(this.currentUserId);
                 if (projects.length > 0) {
                     this.currentProjectId = projects[0].id;
-                    await this.showTaskView('board');
+                    await this.showTaskView('list');
                 }
             }
         }
