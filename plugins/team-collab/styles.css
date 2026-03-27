@@ -1972,26 +1972,41 @@
 }
 
 
-/* ==================== 2026-03 成员添加 / 真实附件上传 ==================== */
-.tc-member-add-box {
+/* ==================== 2026-03-27 参与项目 / 评论真实附件上传 ==================== */
+.tc-list-subtitle,
+.tc-empty-subtext,
+.tc-project-card-meta {
+    font-size: 12px;
+    color: var(--text-secondary, #6b7280);
+}
+
+.tc-participating-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
     padding: 16px;
+}
+
+.tc-project-card {
     border: 1px solid var(--border-color, #e5e7eb);
     border-radius: 12px;
-    background: var(--bg-secondary, #f9fafb);
+    background: var(--bg-primary, #ffffff);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
-.tc-member-add-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-top: 12px;
+.tc-project-card-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary, #1f2937);
 }
 
-.tc-comment-footer-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
+.tc-project-card-desc {
+    font-size: 13px;
+    color: var(--text-secondary, #6b7280);
+    min-height: 38px;
 }
 
 .tc-comment-attachment-list {
@@ -2001,7 +2016,9 @@
     padding: 10px 12px 0;
 }
 
-.tc-comment-attachment-empty {
+.tc-comment-attachment-empty,
+.tc-pending-attachment-meta,
+.tc-comment-attachment-meta {
     font-size: 12px;
     color: var(--text-secondary, #6b7280);
 }
@@ -2017,16 +2034,11 @@
     background: var(--bg-secondary, #f9fafb);
 }
 
-.tc-pending-attachment-name {
+.tc-pending-attachment-name,
+.tc-comment-attachment-name {
     font-size: 13px;
     color: var(--text-primary, #1f2937);
     word-break: break-all;
-}
-
-.tc-pending-attachment-meta,
-.tc-comment-attachment-meta {
-    font-size: 11px;
-    color: var(--text-secondary, #6b7280);
 }
 
 .tc-comment-attachments {
@@ -2041,6 +2053,8 @@
     border-radius: 12px;
     background: var(--bg-secondary, #f9fafb);
     overflow: hidden;
+    text-decoration: none;
+    color: inherit;
 }
 
 .tc-comment-attachment.is-image img {
@@ -2062,11 +2076,14 @@
     align-items: center;
     gap: 12px;
     padding: 10px 12px;
-    text-decoration: none;
-    color: var(--text-primary, #1f2937);
 }
 
-.theme-dark .tc-member-add-box,
+.tc-comment-attachment-link {
+    font-size: 12px;
+    color: var(--primary-color, #3b82f6);
+}
+
+.theme-dark .tc-project-card,
 .theme-dark .tc-pending-attachment,
 .theme-dark .tc-comment-attachment {
     background: var(--bg-secondary, #374151);
