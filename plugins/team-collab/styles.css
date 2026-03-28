@@ -1972,18 +1972,23 @@
 }
 
 
-.tc-comment-toolbar { display:flex; gap:8px; align-items:center; }
-.tc-pending-attachments { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
-.tc-pending-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid var(--border-color, #e5e7eb); border-radius:999px; background:var(--bg-secondary,#f9fafb); font-size:12px; }
+/* ===== 2026-03-28 修复补充样式 ===== */
+.tc-checklist-row { display:flex; gap:8px; margin-bottom:8px; }
+.tc-checklist-list { display:flex; flex-direction:column; gap:8px; }
+.tc-checklist-item { padding:6px 0; }
+.tc-participating-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; padding:16px; }
+.tc-project-card { border:1px solid var(--border-color,#e5e7eb); border-radius:12px; padding:16px; background:var(--bg-primary,#fff); box-shadow:0 1px 2px rgba(0,0,0,.04); }
+.tc-project-card-title { font-size:16px; font-weight:600; margin-bottom:8px; }
+.tc-project-card-desc { font-size:13px; color:var(--text-secondary,#6b7280); margin-bottom:12px; }
+.tc-project-card-actions { display:flex; justify-content:flex-end; }
+.tc-pending-attachments { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
+.tc-pending-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid var(--border-color,#e5e7eb); border-radius:999px; background:var(--bg-secondary,#f9fafb); font-size:12px; }
 .tc-pending-remove { border:none; background:none; cursor:pointer; color:#ef4444; font-size:14px; line-height:1; }
+.tc-comment-toolbar { display:flex; gap:8px; align-items:center; }
 .tc-comment-attachments { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
 .tc-comment-attachment { padding:8px 10px; border:1px solid var(--border-color,#e5e7eb); border-radius:8px; background:var(--bg-secondary,#f9fafb); }
 .tc-comment-attachment.is-image { padding:8px; }
 .tc-comment-image { display:block; max-width:320px; max-height:220px; border-radius:8px; border:1px solid var(--border-color,#e5e7eb); background:#fff; }
 .tc-comment-attachment-name { margin-top:6px; font-size:12px; color:var(--text-secondary,#6b7280); }
 .tc-inline-progress-row { display:flex; align-items:center; gap:8px; margin-top:8px; }
-.tc-participating-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; margin-top:20px; }
-.tc-project-card { border:1px solid var(--border-color,#e5e7eb); border-radius:12px; padding:16px; background:var(--bg-primary,#fff); box-shadow:0 1px 2px rgba(0,0,0,0.04); }
-.tc-project-card-title { font-size:16px; font-weight:600; margin-bottom:8px; }
-.tc-project-card-desc { color:var(--text-secondary,#6b7280); font-size:13px; margin-bottom:12px; }
-.tc-project-card-actions { display:flex; justify-content:flex-end; }
+.tc-remove-member-btn { margin-left:8px; }
