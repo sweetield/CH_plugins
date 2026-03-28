@@ -10,8 +10,7 @@
  */
 
 // 存储键前缀
-const STORAGE_PREFIX = 'plugin:shared:team-collab:data';
-const LEGACY_SHARED_STORAGE_PREFIX = 'plugin:shared:team-collab';
+const STORAGE_PREFIX = 'plugin:shared:team-collab';
 const USER_STORAGE_PREFIX = 'plugin';
 
 // 对象 ID 前缀
@@ -73,10 +72,7 @@ const EVENTS = {
     ATTACHMENT_UPLOADED: 'attachment.uploaded',
     PLAN_SUBMITTED: 'plan.submitted',
     PROJECT_EXPORTED: 'project.exported',
-    NOTIFICATION_RECEIVED: 'notification.received',
-    HELP_REQUESTED: 'help.requested',
-    HELP_CLAIMED: 'help.claimed',
-    HELP_RESOLVED: 'help.resolved'
+    NOTIFICATION_RECEIVED: 'notification.received'
 };
 
 // 通知类型
@@ -87,10 +83,7 @@ const NOTIFICATION_TYPE = {
     COMMENT_MENTION: 'comment_mention',
     COMMENT_REPLY: 'comment_reply',
     PLAN_SUBMISSION: 'plan_submission',
-    PROJECT_INVITED: 'project_invited',
-    HELP_REQUESTED: 'help_requested',
-    HELP_CLAIMED: 'help_claimed',
-    HELP_RESOLVED: 'help_resolved'
+    PROJECT_INVITED: 'project_invited'
 };
 
 // 学习计划模板类型
@@ -129,12 +122,11 @@ const THREAD_STATUS = {
 };
 
 // Schema 版本
-const SCHEMA_VERSION = '3.1.0';
+const SCHEMA_VERSION = '3.0.0';
 
 // 导出常量
 window.TCConstants = {
     STORAGE_PREFIX,
-    LEGACY_SHARED_STORAGE_PREFIX,
     USER_STORAGE_PREFIX,
     ID_PREFIX,
     PROJECT_ROLE,
@@ -540,6 +532,23 @@ function getStatusLabel(status) {
     return labels[status] || labels[C.TASK_STATUS.TODO];
 }
 
+function normalizeUserId(value) {
+    return String(value || '').trim().replace(/^@+/, '').toLowerCase();
+}
+
+function buildUserAliases(...values) {
+    const aliasSet = new Set();
+    const push = (v) => {
+        const normalized = normalizeUserId(v);
+        if (normalized) aliasSet.add(normalized);
+    };
+    values.flat(Infinity).forEach(push);
+    if (Array.isArray(window.TCCurrentUserAliases)) {
+        window.TCCurrentUserAliases.forEach(push);
+    }
+    return Array.from(aliasSet);
+}
+
 // 导出
 window.TCUtils = {
     generateId,
@@ -553,37 +562,9 @@ window.TCUtils = {
     escapeHtml,
     getPriorityColor,
     getPriorityLabel,
-    getStatusLabel
-};
-
-window.TCAttachmentUtils = {
-    MAX_FILE_SIZE: 3 * 1024 * 1024,
-    async fileToDataUrl(file) {
-        return await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = () => reject(new Error(`读取文件失败: ${file?.name || ''}`));
-            reader.readAsDataURL(file);
-        });
-    },
-    async filesToMarkdown(files, ui) {
-        const items = [];
-        for (const file of (files || [])) {
-            if (!file) continue;
-            if (file.size > this.MAX_FILE_SIZE) {
-                ui?.showToast?.(`文件过大，已跳过: ${file.name}（单个文件不超过 3MB）`, 'warning');
-                continue;
-            }
-            const dataUrl = await this.fileToDataUrl(file);
-            const safeName = (file.name || '附件').replace(/\]/g, '\\]');
-            if ((file.type || '').startsWith('image/')) {
-                items.push(`![${safeName}](${dataUrl})`);
-            } else {
-                items.push(`[附件: ${safeName}](${dataUrl})`);
-            }
-        }
-        return items.join('\n');
-    }
+    getStatusLabel,
+    normalizeUserId,
+    buildUserAliases
 };
 /**
  * 团队协作插件 - Markdown 渲染器
@@ -732,16 +713,8 @@ class MarkdownRenderer {
     sanitizeUrl(url) {
         if (!url) return '#';
         const trimmed = url.trim().toLowerCase();
-        if (trimmed.startsWith('javascript:')) {
-            return '#';
-        }
-        const safeDataPrefixes = [
-            'data:image/',
-            'data:application/',
-            'data:text/plain',
-            'blob:'
-        ];
-        if (trimmed.startsWith('data:') && !safeDataPrefixes.some(prefix => trimmed.startsWith(prefix))) {
+        // 禁止 javascript: 和 data: 协议
+        if (trimmed.startsWith('javascript:') || trimmed.startsWith('data:')) {
             return '#';
         }
         return url;
@@ -1086,16 +1059,6 @@ class StorageAdapter {
      */
     getKeys() {
         const C = window.TCConstants;
-        return this.buildKeyMap(C.STORAGE_PREFIX);
-    }
-
-    getLegacyKeys() {
-        const C = window.TCConstants;
-        return this.buildKeyMap(C.LEGACY_SHARED_STORAGE_PREFIX);
-    }
-
-    buildKeyMap(sharedPrefix) {
-        const C = window.TCConstants;
         return {
             // 用户私有
             config: (userId) => `${C.USER_STORAGE_PREFIX}:${userId}:team-collab:config`,
@@ -1103,47 +1066,29 @@ class StorageAdapter {
             myViews: (userId) => `${C.USER_STORAGE_PREFIX}:${userId}:team-collab:view-presets`,
             userProjectIndex: (userId) => `${C.USER_STORAGE_PREFIX}:${userId}:team-collab:user-project-index`,
             userTaskIndex: (userId) => `${C.USER_STORAGE_PREFIX}:${userId}:team-collab:user-task-index`,
-            contacts: (userId) => `${C.USER_STORAGE_PREFIX}:${userId}:team-collab:contacts`,
+            memberProjectIndex: (userId) => `${C.STORAGE_PREFIX}:member-project-index:${userId}`,
+            projectRegistry: () => `${C.STORAGE_PREFIX}:project-registry`,
+            projectAttachmentFolder: (projectId) => `${C.STORAGE_PREFIX}:project-attachment-folder:${projectId}`,
 
             // 项目共享（加密）
-            project: (projectId) => `${sharedPrefix}:project:${projectId}`,
-            projectMembers: (projectId) => `${sharedPrefix}:project-members:${projectId}`,
-            projectTaskIndex: (projectId) => `${sharedPrefix}:project-task-index:${projectId}`,
-            projectPlanIndex: (projectId) => `${sharedPrefix}:project-plan-index:${projectId}`,
-            projectThreadIndex: (projectId) => `${sharedPrefix}:project-thread-index:${projectId}`,
-            projectActivityIndex: (projectId) => `${sharedPrefix}:project-activity-index:${projectId}`,
-            projectRegistry: () => `${sharedPrefix}:project-registry`,
+            project: (projectId) => `${C.STORAGE_PREFIX}:project:${projectId}`,
+            projectMembers: (projectId) => `${C.STORAGE_PREFIX}:project-members:${projectId}`,
+            projectTaskIndex: (projectId) => `${C.STORAGE_PREFIX}:project-task-index:${projectId}`,
+            projectPlanIndex: (projectId) => `${C.STORAGE_PREFIX}:project-plan-index:${projectId}`,
+            projectThreadIndex: (projectId) => `${C.STORAGE_PREFIX}:project-thread-index:${projectId}`,
+            projectActivityIndex: (projectId) => `${C.STORAGE_PREFIX}:project-activity-index:${projectId}`,
 
             // 对象存储
-            task: (taskId) => `${sharedPrefix}:task:${taskId}`,
-            plan: (planId) => `${sharedPrefix}:plan:${planId}`,
-            thread: (threadId) => `${sharedPrefix}:thread:${threadId}`,
-            threadComments: (threadId, page = 1) => `${sharedPrefix}:thread-comments:${threadId}:${page}`,
-            attachmentMeta: (attId) => `${sharedPrefix}:attachment-meta:${attId}`,
-            attachmentBlob: (attId) => `${sharedPrefix}:attachment-blob:${attId}`,
+            task: (taskId) => `${C.STORAGE_PREFIX}:task:${taskId}`,
+            plan: (planId) => `${C.STORAGE_PREFIX}:plan:${planId}`,
+            thread: (threadId) => `${C.STORAGE_PREFIX}:thread:${threadId}`,
+            threadComments: (threadId, page = 1) => `${C.STORAGE_PREFIX}:thread-comments:${threadId}:${page}`,
+            attachmentMeta: (attId) => `${C.STORAGE_PREFIX}:attachment-meta:${attId}`,
+            attachmentBlob: (attId) => `${C.STORAGE_PREFIX}:attachment-blob:${attId}`,
 
             // 邀请码
-            invite: (code) => `${sharedPrefix}:invite:${code}`
+            invite: (code) => `${C.STORAGE_PREFIX}:invite:${code}`
         };
-    }
-
-    async saveSharedBoth(primaryKey, legacyKey, data, encrypted = false) {
-        if (encrypted) {
-            await this.saveEncrypted(primaryKey, data);
-            await this.saveEncrypted(legacyKey, data);
-        } else {
-            await this.save(primaryKey, data);
-            await this.save(legacyKey, data);
-        }
-    }
-
-    async loadSharedWithFallback(primaryKey, legacyKey, encrypted = false, defaultValue = null) {
-        const loader = encrypted ? this.loadEncrypted.bind(this) : this.load.bind(this);
-        const primary = await loader(primaryKey);
-        if (primary !== null && primary !== undefined) return primary;
-        const legacy = await loader(legacyKey);
-        if (legacy !== null && legacy !== undefined) return legacy;
-        return defaultValue;
     }
 
     /**
@@ -1224,8 +1169,7 @@ class StorageAdapter {
      */
     async saveProject(project) {
         const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        await this.saveSharedBoth(keys.project(project.id), legacyKeys.project(project.id), project, true);
+        await this.saveEncrypted(keys.project(project.id), project);
     }
 
     /**
@@ -1235,8 +1179,7 @@ class StorageAdapter {
      */
     async loadProject(projectId) {
         const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        return await this.loadSharedWithFallback(keys.project(projectId), legacyKeys.project(projectId), true);
+        return await this.loadEncrypted(keys.project(projectId));
     }
 
     /**
@@ -1245,8 +1188,7 @@ class StorageAdapter {
      */
     async saveTask(task) {
         const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        await this.saveSharedBoth(keys.task(task.id), legacyKeys.task(task.id), task, true);
+        await this.saveEncrypted(keys.task(task.id), task);
     }
 
     /**
@@ -1256,8 +1198,7 @@ class StorageAdapter {
      */
     async loadTask(taskId) {
         const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        return await this.loadSharedWithFallback(keys.task(taskId), legacyKeys.task(taskId), true);
+        return await this.loadEncrypted(keys.task(taskId));
     }
 
     /**
@@ -1305,8 +1246,7 @@ class StorageAdapter {
      */
     async saveInviteCode(code, inviteData) {
         const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        await this.saveSharedBoth(keys.invite(code), legacyKeys.invite(code), inviteData, false);
+        await this.save(keys.invite(code), inviteData);
     }
 
     /**
@@ -1316,8 +1256,7 @@ class StorageAdapter {
      */
     async loadInviteCode(code) {
         const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        return await this.loadSharedWithFallback(keys.invite(code), legacyKeys.invite(code), false);
+        return await this.load(keys.invite(code));
     }
 
     /**
@@ -1340,24 +1279,54 @@ class StorageAdapter {
         return await this.load(keys.userProjectIndex(userId)) || [];
     }
 
-    /**
-     * 保存用户常用成员/好友列表
-     * @param {string} userId - 用户 ID
-     * @param {Array} contacts - 用户名列表
-     */
-    async saveUserContacts(userId, contacts) {
+    async saveSharedMemberProjectIndex(userId, projectIds) {
         const keys = this.getKeys();
-        await this.save(keys.contacts(userId), Array.isArray(contacts) ? contacts : []);
+        await this.save(keys.memberProjectIndex(userId), projectIds);
     }
 
-    /**
-     * 读取用户常用成员/好友列表
-     * @param {string} userId - 用户 ID
-     * @returns {Promise<Array>}
-     */
-    async loadUserContacts(userId) {
+    async loadSharedMemberProjectIndex(userId) {
         const keys = this.getKeys();
-        return await this.load(keys.contacts(userId)) || [];
+        return await this.load(keys.memberProjectIndex(userId)) || [];
+    }
+
+    async saveProjectRegistry(projectIds) {
+        const keys = this.getKeys();
+        await this.save(keys.projectRegistry(), projectIds);
+    }
+
+    async loadProjectRegistry() {
+        const keys = this.getKeys();
+        return await this.load(keys.projectRegistry()) || [];
+    }
+
+    async saveProjectAttachmentFolder(projectId, folderRef) {
+        const keys = this.getKeys();
+        await this.save(keys.projectAttachmentFolder(projectId), folderRef);
+    }
+
+    async loadProjectAttachmentFolder(projectId) {
+        const keys = this.getKeys();
+        return await this.load(keys.projectAttachmentFolder(projectId));
+    }
+
+    async saveAttachmentMeta(meta) {
+        const keys = this.getKeys();
+        await this.saveEncrypted(keys.attachmentMeta(meta.id), meta);
+    }
+
+    async loadAttachmentMeta(attId) {
+        const keys = this.getKeys();
+        return await this.loadEncrypted(keys.attachmentMeta(attId));
+    }
+
+    async saveAttachmentBlob(attId, blobBase64) {
+        const keys = this.getKeys();
+        await this.save(keys.attachmentBlob(attId), blobBase64);
+    }
+
+    async loadAttachmentBlob(attId) {
+        const keys = this.getKeys();
+        return await this.load(keys.attachmentBlob(attId));
     }
 
     /**
@@ -1367,8 +1336,7 @@ class StorageAdapter {
      */
     async saveProjectTaskIndex(projectId, taskIds) {
         const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        await this.saveSharedBoth(keys.projectTaskIndex(projectId), legacyKeys.projectTaskIndex(projectId), taskIds, false);
+        await this.save(keys.projectTaskIndex(projectId), taskIds);
     }
 
     /**
@@ -1378,52 +1346,7 @@ class StorageAdapter {
      */
     async loadProjectTaskIndex(projectId) {
         const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        return await this.loadSharedWithFallback(keys.projectTaskIndex(projectId), legacyKeys.projectTaskIndex(projectId), false, []);
-    }
-
-    /**
-     * 保存项目学习计划索引
-     * @param {string} projectId - 项目 ID
-     * @param {Array} planIds - 计划 ID 列表
-     */
-    async saveProjectPlanIndex(projectId, planIds) {
-        const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        await this.save(keys.projectPlanIndex(projectId), planIds);
-        await this.save(legacyKeys.projectPlanIndex(projectId), planIds);
-    }
-
-    /**
-     * 读取项目学习计划索引
-     * @param {string} projectId - 项目 ID
-     * @returns {Promise<Array>}
-     */
-    async loadProjectPlanIndex(projectId) {
-        const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        return await this.loadSharedWithFallback(keys.projectPlanIndex(projectId), legacyKeys.projectPlanIndex(projectId), false, []) || [];
-    }
-
-    /**
-     * 保存共享项目注册表
-     * @param {Array} projectIds - 项目 ID 列表
-     */
-    async saveProjectRegistry(projectIds) {
-        const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        const uniqueIds = Array.from(new Set((projectIds || []).filter(Boolean)));
-        await this.saveSharedBoth(keys.projectRegistry(), legacyKeys.projectRegistry(), uniqueIds, false);
-    }
-
-    /**
-     * 读取共享项目注册表
-     * @returns {Promise<Array>}
-     */
-    async loadProjectRegistry() {
-        const keys = this.getKeys();
-        const legacyKeys = this.getLegacyKeys();
-        return await this.loadSharedWithFallback(keys.projectRegistry(), legacyKeys.projectRegistry(), false, []) || [];
+        return await this.load(keys.projectTaskIndex(projectId)) || [];
     }
 
     /**
@@ -1475,11 +1398,6 @@ class IndexManager {
         // 成员加入时更新用户索引
         this.eventBus.on(C.EVENTS.MEMBER_JOINED, async (data) => {
             await this.addProjectToUser(data.userId, data.projectId);
-        });
-
-        // 成员离开时移除用户索引
-        this.eventBus.on(C.EVENTS.MEMBER_LEFT, async (data) => {
-            await this.removeProjectFromUser(data.userId, data.projectId);
         });
 
         // 任务创建时更新项目任务索引
@@ -1548,28 +1466,27 @@ class IndexManager {
      * @returns {Promise<Array>} 项目列表
      */
     async getUserProjects(userId) {
-        const privateProjectIds = await this.storage.loadUserProjectIndex(userId);
-        const sharedProjectIds = await this.storage.loadProjectRegistry();
-        const projectIds = Array.from(new Set([...(privateProjectIds || []), ...(sharedProjectIds || [])]));
+        const aliases = window.TCUtils.buildUserAliases(userId);
+        const privateIds = await this.storage.loadUserProjectIndex(userId);
+        const sharedIndexIds = [];
+        for (const alias of aliases) {
+            const ids = await this.storage.loadSharedMemberProjectIndex(alias);
+            sharedIndexIds.push(...(ids || []));
+        }
+        const registryIds = await this.storage.loadProjectRegistry();
+        const candidateIds = Array.from(new Set([...(privateIds || []), ...(sharedIndexIds || []), ...(registryIds || [])]));
         const projects = [];
-        const discoveredIds = [];
 
-        for (const projectId of projectIds) {
+        for (const projectId of candidateIds) {
             const project = await this.storage.loadProject(projectId);
-            if (!project || project.archivedAt || project.deletedAt) continue;
-            const isMember = (project.members || []).some(member => member.userId === userId);
-            if (!isMember) continue;
-            projects.push(project);
-            discoveredIds.push(projectId);
+            if (!project || project.archivedAt) continue;
+            const members = Array.isArray(project.members) ? project.members : [];
+            const isMember = members.some(m => aliases.includes(window.TCUtils.normalizeUserId(m.userId)));
+            if (isMember) {
+                projects.push(project);
+            }
         }
 
-        const normalizedPrivateIds = Array.from(new Set((privateProjectIds || []).filter(Boolean)));
-        const missingIds = discoveredIds.filter(projectId => !normalizedPrivateIds.includes(projectId));
-        if (missingIds.length > 0) {
-            await this.storage.saveUserProjectIndex(userId, [...normalizedPrivateIds, ...missingIds]);
-        }
-
-        // 按更新时间排序
         projects.sort((a, b) => b.updatedAt - a.updatedAt);
         return projects;
     }
@@ -1723,7 +1640,8 @@ class PermissionService {
      */
     getMemberRole(userId, project) {
         if (!project || !project.members) return null;
-        return project.members.find(m => m.userId === userId) || null;
+        const aliases = window.TCUtils.buildUserAliases(userId);
+        return project.members.find(m => aliases.includes(window.TCUtils.normalizeUserId(m.userId))) || null;
     }
 
     /**
@@ -1931,7 +1849,6 @@ class ProjectService {
         this.permission = permissionService;
         this.indexManager = indexManager;
         this.eventBus = eventBus;
-        this.api = storage.api;
     }
 
     /**
@@ -1942,42 +1859,6 @@ class ProjectService {
     generateId(prefix) {
         const C = window.TCConstants;
         return `${C.ID_PREFIX[prefix.toUpperCase()]}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    }
-
-    normalizeChecklist(checklist = []) {
-        if (!Array.isArray(checklist)) return [];
-        return checklist
-            .map((item, index) => {
-                if (typeof item === 'string') {
-                    return {
-                        id: `plancheck_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
-                        text: item,
-                        createdAt: Date.now()
-                    };
-                }
-                return {
-                    id: item.id || `plancheck_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
-                    text: item.text || '',
-                    createdAt: item.createdAt || Date.now()
-                };
-            })
-            .map(item => ({ ...item, text: String(item.text || '').trim() }))
-            .filter(item => item.text);
-    }
-
-    updateProgressSnapshot(progress, totalTasks) {
-        const checkedItemIds = Array.isArray(progress.checkedItemIds) ? progress.checkedItemIds : [];
-        progress.checkedItemIds = checkedItemIds;
-        progress.totalTasks = totalTasks;
-        progress.completedTasks = checkedItemIds.length;
-        if (progress.completedTasks === 0) {
-            progress.status = 'not_started';
-        } else if (progress.completedTasks >= progress.totalTasks && progress.totalTasks > 0) {
-            progress.status = 'completed';
-        } else {
-            progress.status = 'in_progress';
-        }
-        return progress;
     }
 
     /**
@@ -1991,59 +1872,6 @@ class ProjectService {
             code += chars.charAt(Math.floor(Math.random() * chars.length));
         }
         return code;
-    }
-
-    buildInviteToken(project) {
-        const payload = {
-            projectId: project.id,
-            inviteCode: project.inviteCode,
-            ts: Date.now()
-        };
-        return `TCJOIN:${btoa(unescape(encodeURIComponent(JSON.stringify(payload))))}`;
-    }
-
-    parseInviteInput(inviteInput) {
-        const raw = String(inviteInput || '').trim();
-        const upper = raw.toUpperCase();
-
-        if (upper.startsWith('TCJOIN:')) {
-            try {
-                const decoded = decodeURIComponent(escape(atob(raw.slice(7))));
-                const payload = JSON.parse(decoded);
-                return {
-                    raw,
-                    inviteCode: String(payload.inviteCode || '').trim().toUpperCase(),
-                    projectId: payload.projectId || null,
-                    payload
-                };
-            } catch (error) {
-                throw new TCErrors.InviteError('邀请口令无效');
-            }
-        }
-
-        return { raw, inviteCode: upper, projectId: null, payload: null };
-    }
-
-    /**
-     * 规范化用户名/用户ID
-     * @param {string} input - 输入内容
-     * @returns {string}
-     */
-    normalizeUserId(input) {
-        const normalized = String(input || '')
-            .trim()
-            .replace(/^@+/, '')
-            .replace(/\s+/g, '');
-
-        if (!normalized) {
-            throw new TCErrors.TCError('请输入用户名', 'INVALID_USER');
-        }
-
-        if (normalized.length < 2) {
-            throw new TCErrors.TCError('用户名过短', 'INVALID_USER');
-        }
-
-        return normalized;
     }
 
     /**
@@ -2063,6 +1891,7 @@ class ProjectService {
             : '';
 
         const inviteCode = this.generateInviteCode();
+        const normalizedOwnerId = window.TCUtils.normalizeUserId(userId) || userId;
 
         const project = {
             id: this.generateId('PROJECT'),
@@ -2072,7 +1901,7 @@ class ProjectService {
             ownerId: userId,
             members: [
                 {
-                    userId: userId,
+                    userId: normalizedOwnerId,
                     role: C.PROJECT_ROLE.OWNER,
                     joinedAt: now
                 }
@@ -2098,11 +1927,6 @@ class ProjectService {
         // 保存项目
         await this.storage.saveProject(project);
 
-        const projectRegistry = await this.storage.loadProjectRegistry();
-        if (!projectRegistry.includes(project.id)) {
-            await this.storage.saveProjectRegistry([...projectRegistry, project.id]);
-        }
-
         // 保存邀请码索引
         await this.storage.saveInviteCode(inviteCode, {
             projectId: project.id,
@@ -2112,10 +1936,22 @@ class ProjectService {
             status: 'active'
         });
 
+        const registry = await this.storage.loadProjectRegistry();
+        if (!registry.includes(project.id)) {
+            registry.push(project.id);
+            await this.storage.saveProjectRegistry(registry);
+        }
+
+        const ownerSharedIndex = await this.storage.loadSharedMemberProjectIndex(normalizedOwnerId);
+        if (!ownerSharedIndex.includes(project.id)) {
+            ownerSharedIndex.push(project.id);
+        }
+        await this.storage.saveSharedMemberProjectIndex(normalizedOwnerId, ownerSharedIndex);
+
         // 触发事件
         this.eventBus.emit(C.EVENTS.PROJECT_CREATED, {
             projectId: project.id,
-            userId: userId
+            userId: normalizedUserId
         });
 
         console.log('[ProjectService] 项目创建成功:', project.id);
@@ -2130,6 +1966,12 @@ class ProjectService {
     async getProject(projectId) {
         const project = await this.storage.loadProject(projectId);
         if (!project) return null;
+
+        const registry = await this.storage.loadProjectRegistry();
+        if (!registry.includes(projectId)) {
+            registry.push(projectId);
+            await this.storage.saveProjectRegistry(registry);
+        }
 
         // 解密项目名称和描述
         return {
@@ -2221,54 +2063,44 @@ class ProjectService {
      * @param {string} userId - 用户 ID
      * @returns {Promise<Object>} 加入的项目
      */
-    async joinProjectByInviteCode(inviteInput, userId) {
+    async joinProjectByInviteCode(inviteCode, userId) {
         const C = window.TCConstants;
-        const parsedInvite = this.parseInviteInput(inviteInput);
-        const inviteCode = parsedInvite.inviteCode;
 
-        if (!inviteCode) {
+        // 读取邀请码索引
+        const inviteData = await this.storage.loadInviteCode(inviteCode);
+
+        if (!inviteData) {
             throw new TCErrors.InviteError('邀请码无效');
         }
 
-        let inviteData = await this.storage.loadInviteCode(inviteCode);
-        let project = null;
-
-        if (inviteData) {
-            if (inviteData.status !== 'active') {
-                throw new TCErrors.InviteError('邀请码已失效');
-            }
-
-            if (inviteData.expiresAt && inviteData.expiresAt < Date.now()) {
-                throw new TCErrors.InviteError('邀请码已过期');
-            }
-
-            if (inviteData.maxUses && inviteData.usedCount >= inviteData.maxUses) {
-                throw new TCErrors.InviteError('邀请码使用次数已达上限');
-            }
-
-            project = await this.storage.loadProject(inviteData.projectId);
+        if (inviteData.status !== 'active') {
+            throw new TCErrors.InviteError('邀请码已失效');
         }
 
-        if (!project && parsedInvite.projectId) {
-            project = await this.storage.loadProject(parsedInvite.projectId);
-            if (!project) {
-                throw new TCErrors.InviteError('项目不存在');
-            }
-            if (project.inviteCode !== inviteCode) {
-                throw new TCErrors.InviteError('邀请码无效');
-            }
+        if (inviteData.expiresAt && inviteData.expiresAt < Date.now()) {
+            throw new TCErrors.InviteError('邀请码已过期');
         }
 
+        if (inviteData.maxUses && inviteData.usedCount >= inviteData.maxUses) {
+            throw new TCErrors.InviteError('邀请码使用次数已达上限');
+        }
+
+        // 获取项目
+        const project = await this.storage.loadProject(inviteData.projectId);
         if (!project) {
-            throw new TCErrors.InviteError('邀请码无效');
+            throw new TCErrors.InviteError('项目不存在');
         }
 
-        if (project.members.some(m => m.userId === userId)) {
+        const normalizedUserId = window.TCUtils.normalizeUserId(userId) || userId;
+
+        // 检查是否已经是成员
+        if (project.members.some(m => window.TCUtils.normalizeUserId(m.userId) === normalizedUserId)) {
             throw new TCErrors.InviteError('你已经是该项目的成员');
         }
 
+        // 添加成员
         project.members.push({
-            userId: userId,
+            userId: normalizedUserId,
             role: C.PROJECT_ROLE.MEMBER,
             joinedAt: Date.now()
         });
@@ -2276,18 +2108,21 @@ class ProjectService {
         project.updatedAt = Date.now();
         project.version = (project.version || 1) + 1;
 
-        if (inviteData) {
-            inviteData.usedCount = (inviteData.usedCount || 0) + 1;
-            await this.storage.saveInviteCode(inviteCode, inviteData);
-        }
+        // 更新邀请码使用次数
+        inviteData.usedCount++;
+        await this.storage.saveInviteCode(inviteCode, inviteData);
 
+        // 保存项目
         await this.storage.saveProject(project);
-
-        const joinedRegistry = await this.storage.loadProjectRegistry();
-        if (!joinedRegistry.includes(project.id)) {
-            await this.storage.saveProjectRegistry([...joinedRegistry, project.id]);
+        const registry = await this.storage.loadProjectRegistry();
+        if (!registry.includes(project.id)) { registry.push(project.id); await this.storage.saveProjectRegistry(registry); }
+        const joinedIndex = await this.storage.loadSharedMemberProjectIndex(normalizedUserId);
+        if (!joinedIndex.includes(project.id)) {
+            joinedIndex.push(project.id);
+            await this.storage.saveSharedMemberProjectIndex(userId, joinedIndex);
         }
 
+        // 触发事件
         this.eventBus.emit(C.EVENTS.MEMBER_JOINED, {
             projectId: project.id,
             userId: userId
@@ -2298,14 +2133,14 @@ class ProjectService {
     }
 
     /**
-     * 通过用户名直接添加成员到项目
+     * 邀请成员加入项目
      * @param {string} projectId - 项目 ID
-     * @param {string} targetUserId - 被添加用户 ID/用户名
+     * @param {string} targetUserId - 被邀请用户 ID
      * @param {string} operatorId - 操作者 ID
-     * @param {string} role - 成员角色
      */
-    async inviteMember(projectId, targetUserId, operatorId, role = 'member') {
+    async inviteMember(projectId, targetUserId, operatorId) {
         const C = window.TCConstants;
+        const normalizedTargetUserId = window.TCUtils.normalizeUserId(targetUserId) || String(targetUserId || '').trim();
         const project = await this.storage.loadProject(projectId);
 
         if (!project) {
@@ -2314,21 +2149,16 @@ class ProjectService {
 
         this.permission.assertPermission(
             this.permission.canInviteMembers(operatorId, project),
-            '添加成员'
+            '邀请成员'
         );
 
-        const normalizedUserId = this.normalizeUserId(targetUserId);
-
-        if (project.members.some(m => m.userId === normalizedUserId)) {
+        if (project.members.some(m => window.TCUtils.normalizeUserId(m.userId) === normalizedTargetUserId)) {
             throw new TCErrors.TCError('该用户已经是项目成员', 'ALREADY_MEMBER');
         }
 
-        const allowedRoles = [C.PROJECT_ROLE.ADMIN, C.PROJECT_ROLE.MEMBER, C.PROJECT_ROLE.GUEST];
-        const finalRole = allowedRoles.includes(role) ? role : C.PROJECT_ROLE.MEMBER;
-
         project.members.push({
-            userId: normalizedUserId,
-            role: finalRole,
+            userId: normalizedTargetUserId,
+            role: C.PROJECT_ROLE.MEMBER,
             joinedAt: Date.now()
         });
 
@@ -2337,21 +2167,31 @@ class ProjectService {
 
         await this.storage.saveProject(project);
 
-        const memberRegistry = await this.storage.loadProjectRegistry();
-        if (!memberRegistry.includes(project.id)) {
-            await this.storage.saveProjectRegistry([...memberRegistry, project.id]);
+        const registry = await this.storage.loadProjectRegistry();
+        if (!registry.includes(project.id)) {
+            registry.push(project.id);
+            await this.storage.saveProjectRegistry(registry);
+        }
+
+        const memberIndex = await this.storage.loadSharedMemberProjectIndex(normalizedTargetUserId);
+        if (!memberIndex.includes(project.id)) {
+            memberIndex.push(project.id);
+            await this.storage.saveSharedMemberProjectIndex(normalizedTargetUserId, memberIndex);
+        }
+
+        const privateIndex = await this.storage.loadUserProjectIndex(normalizedTargetUserId);
+        if (!privateIndex.includes(project.id)) {
+            privateIndex.push(project.id);
+            await this.storage.saveUserProjectIndex(normalizedTargetUserId, privateIndex);
         }
 
         this.eventBus.emit(C.EVENTS.MEMBER_JOINED, {
             projectId: project.id,
-            userId: normalizedUserId
+            userId: normalizedTargetUserId
         });
-
-        return await this.getProject(project.id);
     }
 
     /**
-     * 移除成员    /**
      * 移除成员
      * @param {string} projectId - 项目 ID
      * @param {string} targetUserId - 被移除用户 ID
@@ -2381,6 +2221,11 @@ class ProjectService {
         project.version = (project.version || 1) + 1;
 
         await this.storage.saveProject(project);
+        const memberIndex = await this.storage.loadSharedMemberProjectIndex(targetUserId);
+        await this.storage.saveSharedMemberProjectIndex(
+            targetUserId,
+            memberIndex.filter(id => id !== project.id)
+        );
 
         // 触发事件
         this.eventBus.emit(C.EVENTS.MEMBER_LEFT, {
@@ -2425,51 +2270,6 @@ class ProjectService {
         project.version = (project.version || 1) + 1;
 
         await this.storage.saveProject(project);
-    }
-
-    /**
-     * 删除项目（软删除，并从索引中移除）
-     * @param {string} projectId - 项目 ID
-     * @param {string} userId - 操作者 ID
-     */
-    async deleteProject(projectId, userId) {
-        const project = await this.storage.loadProject(projectId);
-
-        if (!project) {
-            throw new TCErrors.TCError('项目不存在', 'NOT_FOUND');
-        }
-
-        this.permission.assertPermission(
-            this.permission.canDeleteProject(userId, project),
-            '删除项目'
-        );
-
-        const now = Date.now();
-        project.deletedAt = now;
-        project.archivedAt = project.archivedAt || now;
-        project.updatedAt = now;
-        project.version = (project.version || 1) + 1;
-
-        await this.storage.saveProject(project);
-
-        const registry = await this.storage.loadProjectRegistry();
-        if (registry.includes(projectId)) {
-            await this.storage.saveProjectRegistry(registry.filter(id => id !== projectId));
-        }
-
-        for (const member of (project.members || [])) {
-            await this.indexManager.removeProjectFromUser(member.userId, projectId);
-        }
-
-        if (project.inviteCode) {
-            const inviteData = await this.storage.loadInviteCode(project.inviteCode);
-            if (inviteData) {
-                inviteData.status = 'deleted';
-                await this.storage.saveInviteCode(project.inviteCode, inviteData);
-            }
-        }
-
-        return true;
     }
 
     /**
@@ -2569,33 +2369,6 @@ class TaskService {
      * @param {string} userId - 创建者 ID
      * @returns {Promise<Object>} 创建的任务
      */
-    normalizeChecklist(items = []) {
-        return (items || [])
-            .map((item, index) => {
-                if (typeof item === 'string') {
-                    return {
-                        id: `check_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
-                        text: item.trim(),
-                        done: false,
-                        createdAt: Date.now()
-                    };
-                }
-                return {
-                    id: item.id || `check_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
-                    text: String(item.text || '').trim(),
-                    done: Boolean(item.done),
-                    createdAt: item.createdAt || Date.now()
-                };
-            })
-            .filter(item => item.text);
-    }
-
-    calcChecklistProgress(items = []) {
-        if (!items || items.length === 0) return 0;
-        const doneCount = items.filter(item => item.done).length;
-        return Math.round((doneCount / items.length) * 100);
-    }
-
     async createTask(input, userId) {
         const C = window.TCConstants;
         const now = Date.now();
@@ -2618,8 +2391,6 @@ class TaskService {
             ? await this.crypto.encrypt(input.description)
             : '';
 
-        const checklist = this.normalizeChecklist(input.checklist || []);
-
         const task = {
             id: this.generateId('TASK'),
             projectId: input.projectId,
@@ -2631,21 +2402,15 @@ class TaskService {
             priority: input.priority || C.TASK_PRIORITY.MEDIUM,
             createdBy: userId,
             ownerId: userId,
-            assigneeIds: input.assigneeIds || [],
+            assigneeIds: (Array.isArray(input.assigneeIds) && input.assigneeIds.length > 0) ? Array.from(new Set(input.assigneeIds)) : [userId],
             watcherIds: [userId],
             visibility: input.visibility || project.defaultTaskVisibility || C.VISIBILITY.PROJECT,
-            taskType: input.taskType || 'task',
             tags: input.tags || [],
-            helpRequested: Boolean(input.helpRequested),
-            helpStatus: input.helpStatus || (input.helpRequested ? 'open' : 'none'),
-            helpMessage: input.helpMessage || '',
-            helperIds: input.helperIds || [],
-            checklist,
             startDate: input.startDate || null,
             dueDate: input.dueDate || null,
             completedAt: null,
-            progress: checklist.length > 0 ? this.calcChecklistProgress(checklist) : 0,
-            progressMode: checklist.length > 0 ? 'checklist' : 'manual',
+            progress: 0,
+            progressMode: 'manual',
             parentTaskId: input.parentTaskId || null,
             subTaskIds: [],
             dependsOn: input.dependsOn || [],
@@ -2814,57 +2579,12 @@ class TaskService {
             activities.push({ field: 'visibility', time: now });
         }
 
-        if (updates.taskType !== undefined) {
-            task.taskType = updates.taskType;
-            activities.push({ field: 'taskType', time: now });
-        }
-
         if (updates.tags !== undefined) {
             task.tags = updates.tags;
             activities.push({ field: 'tags', time: now });
         }
 
-        if (updates.checklist !== undefined) {
-            task.checklist = this.normalizeChecklist(updates.checklist);
-            task.progressMode = task.checklist.length > 0 ? 'checklist' : task.progressMode;
-            if (task.checklist.length > 0) {
-                task.progress = this.calcChecklistProgress(task.checklist);
-                if (task.progress >= 100) {
-                    task.status = C.TASK_STATUS.DONE;
-                    task.completedAt = now;
-                } else if (task.status === C.TASK_STATUS.DONE) {
-                    task.status = task.progress > 0 ? C.TASK_STATUS.DOING : C.TASK_STATUS.TODO;
-                    task.completedAt = null;
-                }
-            }
-            activities.push({ field: 'checklist', time: now });
-        }
-
-        if (updates.helpRequested !== undefined) {
-            task.helpRequested = Boolean(updates.helpRequested);
-            if (!task.helpRequested && updates.helpStatus === undefined) {
-                task.helpStatus = 'none';
-            }
-            activities.push({ field: 'helpRequested', time: now });
-        }
-
-        if (updates.helpStatus !== undefined) {
-            task.helpStatus = updates.helpStatus;
-            activities.push({ field: 'helpStatus', time: now });
-        }
-
-        if (updates.helpMessage !== undefined) {
-            task.helpMessage = updates.helpMessage;
-            activities.push({ field: 'helpMessage', time: now });
-        }
-
-        if (updates.helperIds !== undefined) {
-            task.helperIds = updates.helperIds;
-            activities.push({ field: 'helperIds', time: now });
-        }
-
         if (updates.progress !== undefined) {
-            task.progressMode = 'manual';
             task.progress = Math.min(100, Math.max(0, updates.progress));
         }
 
@@ -3213,7 +2933,6 @@ class CommentService {
                     userId,
                     commentId: comment.id,
                     threadId: thread.id,
-                    projectId: input.projectId,
                     targetType: input.targetType,
                     targetId: input.targetId,
                     mentionedBy: input.authorId
@@ -3469,6 +3188,175 @@ class CommentService {
 // 导出
 window.TCCommentService = CommentService;
 /**
+ * 团队协作插件 - 附件服务
+ */
+class AttachmentService {
+    constructor(api, storage) {
+        this.api = api;
+        this.storage = storage;
+    }
+
+    generateId() {
+        return 'att_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+    }
+
+    async fileToDataUrl(file) {
+        return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    normalizeRef(value) {
+        if (!value) return '';
+        if (typeof value === 'string') return value;
+        return value.id || value.fileId || value.folderId || value.path || value.url || value?.data?.id || value?.data?.fileId || '';
+    }
+
+    normalizeDownloadUrl(result) {
+        if (!result) return '';
+        if (typeof result === 'string') return result;
+        if (typeof Blob !== 'undefined' && result instanceof Blob) return URL.createObjectURL(result);
+        if (typeof File !== 'undefined' && result instanceof File) return URL.createObjectURL(result);
+        if (typeof ArrayBuffer !== 'undefined' && result instanceof ArrayBuffer) return URL.createObjectURL(new Blob([result]));
+        return result.url || result.downloadUrl || result.previewUrl || result?.data?.url || result?.data?.downloadUrl || '';
+    }
+
+    async ensureProjectFolder(projectId) {
+        let folderRef = await this.storage.loadProjectAttachmentFolder(projectId);
+        if (folderRef) return folderRef;
+        if (!this.api?.drive?.createFolder) return '';
+        try {
+            const created = await this.api.drive.createFolder(`team-collab-${projectId}`);
+            folderRef = this.normalizeRef(created);
+            if (folderRef) {
+                await this.storage.saveProjectAttachmentFolder(projectId, folderRef);
+            }
+            return folderRef || '';
+        } catch (error) {
+            console.warn('[AttachmentService] 创建项目附件目录失败，尝试直接上传:', error);
+            return '';
+        }
+    }
+
+    async uploadSingleFile(file, projectId, userId) {
+        if (!file) return null;
+        if (file.size > 20 * 1024 * 1024) {
+            throw new Error(`文件过大：${file.name}，请控制在 20MB 以内`);
+        }
+
+        const attachmentId = this.generateId();
+        const kind = (file.type || '').startsWith('image/') ? 'image' : 'file';
+        const folderRef = await this.ensureProjectFolder(projectId);
+
+        let fileId = '';
+        let downloadUrl = '';
+        if (!this.api?.drive?.uploadFile) {
+            throw new Error('宿主未提供 drive.uploadFile，无法执行真实文件上传');
+        }
+
+        try {
+            const uploaded = await this.api.drive.uploadFile(file, folderRef || undefined);
+            fileId = this.normalizeRef(uploaded);
+            downloadUrl = this.normalizeDownloadUrl(uploaded);
+        } catch (error) {
+            if (folderRef) {
+                const uploaded = await this.api.drive.uploadFile(file, undefined);
+                fileId = this.normalizeRef(uploaded);
+                downloadUrl = this.normalizeDownloadUrl(uploaded);
+            } else {
+                throw error;
+            }
+        }
+
+        const previewDataUrl = kind === 'image' ? await this.fileToDataUrl(file) : '';
+        const meta = {
+            id: attachmentId,
+            projectId,
+            uploadedBy: userId,
+            name: file.name,
+            size: file.size,
+            type: file.type || 'application/octet-stream',
+            kind,
+            createdAt: Date.now(),
+            fileId,
+            folderRef: folderRef || '',
+            downloadUrl: downloadUrl || '',
+            previewDataUrl: previewDataUrl || ''
+        };
+
+        await this.storage.saveAttachmentMeta(meta);
+
+        return {
+            attachmentId,
+            name: meta.name,
+            type: meta.type,
+            size: meta.size,
+            kind: meta.kind,
+            fileId: meta.fileId,
+            downloadUrl: meta.downloadUrl,
+            previewUrl: meta.previewDataUrl || meta.downloadUrl || ''
+        };
+    }
+
+    async uploadFiles(files, projectId, userId) {
+        const list = Array.from(files || []);
+        const uploaded = [];
+        for (const file of list) {
+            const item = await this.uploadSingleFile(file, projectId, userId);
+            if (item) uploaded.push(item);
+        }
+        return uploaded;
+    }
+
+    async resolveDownloadUrl(meta) {
+        if (!meta) return '';
+        if (meta.downloadUrl) return meta.downloadUrl;
+        if (!meta.fileId || !this.api?.drive?.downloadFile) return '';
+        try {
+            const downloaded = await this.api.drive.downloadFile(meta.fileId);
+            return this.normalizeDownloadUrl(downloaded);
+        } catch (error) {
+            console.warn('[AttachmentService] 获取下载地址失败:', error);
+            return '';
+        }
+    }
+
+    async getAttachment(attachmentId) {
+        const meta = await this.storage.loadAttachmentMeta(attachmentId);
+        if (!meta) return null;
+
+        const legacyBase64 = await this.storage.loadAttachmentBlob(attachmentId);
+        const downloadUrl = await this.resolveDownloadUrl(meta);
+        const previewUrl = meta.previewDataUrl || (meta.kind === 'image' ? downloadUrl : '');
+        const legacyDataUrl = legacyBase64 ? `data:${meta.type || 'application/octet-stream'};base64,${legacyBase64}` : '';
+
+        return {
+            ...meta,
+            url: downloadUrl || previewUrl || legacyDataUrl || '',
+            downloadUrl: downloadUrl || legacyDataUrl || '',
+            previewUrl: previewUrl || legacyDataUrl || '',
+            dataUrl: previewUrl || legacyDataUrl || downloadUrl || ''
+        };
+    }
+
+    async hydrateComments(comments) {
+        const list = Array.isArray(comments) ? comments : [];
+        return await Promise.all(list.map(async (comment) => {
+            const attachmentIds = Array.isArray(comment.attachmentIds) ? comment.attachmentIds : [];
+            const attachments = [];
+            for (const attachmentId of attachmentIds) {
+                const attachment = await this.getAttachment(attachmentId);
+                if (attachment) attachments.push(attachment);
+            }
+            return { ...comment, attachments };
+        }));
+    }
+}
+window.TCAttachmentService = AttachmentService;
+/**
  * 团队协作插件 - 学习计划服务
  */
 
@@ -3489,42 +3377,6 @@ class PlanService {
         return `${C.ID_PREFIX[prefix.toUpperCase()]}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
 
-    normalizeChecklist(checklist = []) {
-        if (!Array.isArray(checklist)) return [];
-        return checklist
-            .map((item, index) => {
-                if (typeof item === 'string') {
-                    return {
-                        id: `plancheck_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
-                        text: item,
-                        createdAt: Date.now()
-                    };
-                }
-                return {
-                    id: item.id || `plancheck_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
-                    text: item.text || '',
-                    createdAt: item.createdAt || Date.now()
-                };
-            })
-            .map(item => ({ ...item, text: String(item.text || '').trim() }))
-            .filter(item => item.text);
-    }
-
-    updateProgressSnapshot(progress, totalTasks) {
-        const checkedItemIds = Array.isArray(progress.checkedItemIds) ? progress.checkedItemIds : [];
-        progress.checkedItemIds = checkedItemIds;
-        progress.totalTasks = totalTasks;
-        progress.completedTasks = checkedItemIds.length;
-        if (progress.completedTasks === 0) {
-            progress.status = 'not_started';
-        } else if (progress.completedTasks >= progress.totalTasks && progress.totalTasks > 0) {
-            progress.status = 'completed';
-        } else {
-            progress.status = 'in_progress';
-        }
-        return progress;
-    }
-
     /**
      * 创建学习计划
      * @param {Object} input - 计划输入
@@ -3534,8 +3386,8 @@ class PlanService {
     async createPlan(input, userId) {
         const C = window.TCConstants;
         const now = Date.now();
-        const checklist = this.normalizeChecklist(input.checklist || []);
 
+        // 加密标题和描述
         const titleEncrypted = await this.crypto.encryptWithIndex(input.title);
         const descriptionEncrypted = input.description
             ? await this.crypto.encrypt(input.description)
@@ -3550,7 +3402,6 @@ class PlanService {
             templateType: input.templateType || C.PLAN_TEMPLATE_TYPE.CUSTOM,
             objectives: input.objectives || '',
             deliverables: input.deliverables || [],
-            checklist,
             createdBy: userId,
             assigneeIds: input.assigneeIds || [],
             taskIds: [],
@@ -3568,21 +3419,20 @@ class PlanService {
             version: 1
         };
 
+        // 初始化每个成员的进度
         plan.assigneeIds.forEach(memberId => {
-            plan.progress[memberId] = this.updateProgressSnapshot({
+            plan.progress[memberId] = {
+                completedTasks: 0,
+                totalTasks: 0,
                 submissions: [],
-                status: 'not_started',
-                checkedItemIds: []
-            }, checklist.length);
+                status: 'not_started'
+            };
         });
 
+        // 保存计划
         await this.storage.savePlan(plan);
-        const planIds = await this.storage.loadProjectPlanIndex(input.projectId);
-        if (!planIds.includes(plan.id)) {
-            planIds.push(plan.id);
-            await this.storage.saveProjectPlanIndex(input.projectId, planIds);
-        }
 
+        // 更新项目统计
         await this.updateProjectPlanStats(input.projectId);
 
         console.log('[PlanService] 学习计划创建成功:', plan.id);
@@ -3638,30 +3488,18 @@ class PlanService {
         }
 
         if (updates.assigneeIds !== undefined) {
+            // 添加新成员的进度
             updates.assigneeIds.forEach(memberId => {
                 if (!plan.progress[memberId]) {
                     plan.progress[memberId] = {
+                        completedTasks: 0,
+                        totalTasks: 0,
                         submissions: [],
-                        status: 'not_started',
-                        checkedItemIds: []
+                        status: 'not_started'
                     };
                 }
-                this.updateProgressSnapshot(plan.progress[memberId], (plan.checklist || []).length + (plan.taskIds || []).length);
             });
             plan.assigneeIds = updates.assigneeIds;
-        }
-
-        if (updates.checklist !== undefined) {
-            plan.checklist = this.normalizeChecklist(updates.checklist);
-            const totalTasks = (plan.checklist || []).length + (plan.taskIds || []).length;
-            plan.assigneeIds.forEach(memberId => {
-                if (!plan.progress[memberId]) {
-                    plan.progress[memberId] = { submissions: [], status: 'not_started', checkedItemIds: [] };
-                }
-                const validIds = new Set((plan.checklist || []).map(item => item.id));
-                plan.progress[memberId].checkedItemIds = (plan.progress[memberId].checkedItemIds || []).filter(id => validIds.has(id));
-                this.updateProgressSnapshot(plan.progress[memberId], totalTasks);
-            });
         }
 
         plan.updatedAt = now;
@@ -3697,10 +3535,12 @@ class PlanService {
      * @returns {Promise<Array>}
      */
     async getProjectPlans(projectId) {
-        const planIds = await this.storage.loadProjectPlanIndex(projectId);
+        // 从存储加载所有计划
+        const keys = await this.api?.storage?.keys?.(`${window.TCConstants.STORAGE_PREFIX}:plan:*`) || [];
         const plans = [];
 
-        for (const planId of planIds) {
+        for (const key of keys) {
+            const planId = key.split(':').pop();
             const plan = await this.storage.loadPlan(planId);
             if (plan && plan.projectId === projectId && !plan.deletedAt) {
                 plans.push({
@@ -3711,6 +3551,7 @@ class PlanService {
             }
         }
 
+        // 按更新时间排序
         plans.sort((a, b) => b.updatedAt - a.updatedAt);
         return plans;
     }
@@ -3840,8 +3681,6 @@ class PlanService {
         this.eventBus.emit(window.TCConstants.EVENTS.PLAN_SUBMITTED, {
             planId,
             userId,
-            createdBy: plan.createdBy,
-            projectId: plan.projectId,
             submissionId: submitObj.id
         });
 
@@ -3865,47 +3704,33 @@ class PlanService {
 
         if (!plan.progress[userId]) {
             plan.progress[userId] = {
+                completedTasks: 0,
+                totalTasks: plan.taskIds.length,
                 submissions: [],
-                status: 'not_started',
-                checkedItemIds: []
+                status: 'not_started'
             };
         }
 
-        const totalTasks = (plan.checklist || []).length + (plan.taskIds || []).length;
-        this.updateProgressSnapshot(plan.progress[userId], totalTasks);
-        plan.updatedAt = Date.now();
-        plan.version = (plan.version || 1) + 1;
-
-        await this.storage.savePlan(plan);
-    }
-
-    async updateChecklistState(planId, itemId, userId, completed) {
-        const plan = await this.storage.loadPlan(planId);
-
-        if (!plan || plan.deletedAt) {
-            throw new TCErrors.TCError('学习计划不存在', 'NOT_FOUND');
-        }
-
-        if (!plan.progress[userId]) {
-            plan.progress[userId] = {
-                submissions: [],
-                status: 'not_started',
-                checkedItemIds: []
-            };
-        }
-
-        const checked = new Set(plan.progress[userId].checkedItemIds || []);
         if (completed) {
-            checked.add(itemId);
+            plan.progress[userId].completedTasks++;
         } else {
-            checked.delete(itemId);
+            plan.progress[userId].completedTasks = Math.max(0, plan.progress[userId].completedTasks - 1);
         }
-        plan.progress[userId].checkedItemIds = Array.from(checked);
-        this.updateProgressSnapshot(plan.progress[userId], (plan.checklist || []).length + (plan.taskIds || []).length);
+
+        // 更新状态
+        const progress = plan.progress[userId];
+        if (progress.completedTasks === 0) {
+            progress.status = 'not_started';
+        } else if (progress.completedTasks >= progress.totalTasks) {
+            progress.status = 'completed';
+        } else {
+            progress.status = 'in_progress';
+        }
+
         plan.updatedAt = Date.now();
         plan.version = (plan.version || 1) + 1;
+
         await this.storage.savePlan(plan);
-        return this.getMemberProgress(planId, userId);
     }
 
     /**
@@ -3921,13 +3746,14 @@ class PlanService {
             throw new TCErrors.TCError('学习计划不存在', 'NOT_FOUND');
         }
 
-        const totalTasks = (plan.checklist || []).length + (plan.taskIds || []).length;
-        const progress = this.updateProgressSnapshot(plan.progress[userId] || {
+        const progress = plan.progress[userId] || {
+            completedTasks: 0,
+            totalTasks: plan.taskIds.length,
             submissions: [],
-            status: 'not_started',
-            checkedItemIds: []
-        }, totalTasks);
+            status: 'not_started'
+        };
 
+        // 计算百分比
         const percentage = progress.totalTasks > 0
             ? Math.round((progress.completedTasks / progress.totalTasks) * 100)
             : 0;
@@ -4070,53 +3896,6 @@ class NotificationService {
                 targetType: 'project',
                 targetId: data.projectId
             });
-        });
-
-        this.eventBus.on(C.EVENTS.HELP_REQUESTED, async (data) => {
-            if (!data.userIds || data.userIds.length === 0) return;
-            for (const userId of data.userIds) {
-                if (userId === data.requestedBy) continue;
-                await this.createNotification({
-                    userId,
-                    type: C.NOTIFICATION_TYPE.HELP_REQUESTED,
-                    title: '有成员发起了协作求助',
-                    content: data.taskTitle || '有任务需要支援',
-                    projectId: data.projectId,
-                    targetType: 'task',
-                    targetId: data.taskId
-                });
-            }
-        });
-
-        this.eventBus.on(C.EVENTS.HELP_CLAIMED, async (data) => {
-            if (!data.notifyUserIds || data.notifyUserIds.length === 0) return;
-            for (const userId of data.notifyUserIds) {
-                if (userId === data.helperId) continue;
-                await this.createNotification({
-                    userId,
-                    type: C.NOTIFICATION_TYPE.HELP_CLAIMED,
-                    title: '求助已有人响应',
-                    content: data.taskTitle || '求助任务已被认领',
-                    projectId: data.projectId,
-                    targetType: 'task',
-                    targetId: data.taskId
-                });
-            }
-        });
-
-        this.eventBus.on(C.EVENTS.HELP_RESOLVED, async (data) => {
-            if (!data.notifyUserIds || data.notifyUserIds.length === 0) return;
-            for (const userId of data.notifyUserIds) {
-                await this.createNotification({
-                    userId,
-                    type: C.NOTIFICATION_TYPE.HELP_RESOLVED,
-                    title: '协作求助已解决',
-                    content: data.taskTitle || '求助任务已标记解决',
-                    projectId: data.projectId,
-                    targetType: 'task',
-                    targetId: data.taskId
-                });
-            }
         });
     }
 
@@ -4323,10 +4102,7 @@ class NotificationService {
             [C.NOTIFICATION_TYPE.COMMENT_MENTION]: '@提及',
             [C.NOTIFICATION_TYPE.COMMENT_REPLY]: '评论回复',
             [C.NOTIFICATION_TYPE.PLAN_SUBMISSION]: '成果提交',
-            [C.NOTIFICATION_TYPE.PROJECT_INVITED]: '项目邀请',
-            [C.NOTIFICATION_TYPE.HELP_REQUESTED]: '协作求助',
-            [C.NOTIFICATION_TYPE.HELP_CLAIMED]: '已响应求助',
-            [C.NOTIFICATION_TYPE.HELP_RESOLVED]: '求助已解决'
+            [C.NOTIFICATION_TYPE.PROJECT_INVITED]: '项目邀请'
         };
         return labels[type] || '通知';
     }
@@ -4345,10 +4121,7 @@ class NotificationService {
             [C.NOTIFICATION_TYPE.COMMENT_MENTION]: '@',
             [C.NOTIFICATION_TYPE.COMMENT_REPLY]: '💬',
             [C.NOTIFICATION_TYPE.PLAN_SUBMISSION]: '📝',
-            [C.NOTIFICATION_TYPE.PROJECT_INVITED]: '👥',
-            [C.NOTIFICATION_TYPE.HELP_REQUESTED]: '🆘',
-            [C.NOTIFICATION_TYPE.HELP_CLAIMED]: '🤝',
-            [C.NOTIFICATION_TYPE.HELP_RESOLVED]: '✅'
+            [C.NOTIFICATION_TYPE.PROJECT_INVITED]: '👥'
         };
         return icons[type] || '🔔';
     }
@@ -5017,13 +4790,6 @@ class Panel {
         document.getElementById('tc-close-panel').addEventListener('click', () => {
             this.close();
         });
-
-        this.handleKeydown = (e) => {
-            if (e.key === 'Escape' && this.isOpen) {
-                this.close();
-            }
-        };
-        document.addEventListener('keydown', this.handleKeydown);
     }
 
     /**
@@ -5032,8 +4798,6 @@ class Panel {
     open() {
         if (this.panel) {
             this.panel.classList.add('open');
-            document.documentElement.classList.add('tc-collab-open');
-            document.body.classList.add('tc-collab-open');
             this.isOpen = true;
         }
     }
@@ -5044,8 +4808,6 @@ class Panel {
     close() {
         if (this.panel) {
             this.panel.classList.remove('open');
-            document.documentElement.classList.remove('tc-collab-open');
-            document.body.classList.remove('tc-collab-open');
             this.isOpen = false;
         }
     }
@@ -5138,11 +4900,6 @@ class Panel {
      * 销毁面板
      */
     destroy() {
-        document.documentElement.classList.remove('tc-collab-open');
-        document.body.classList.remove('tc-collab-open');
-        if (this.handleKeydown) {
-            document.removeEventListener('keydown', this.handleKeydown);
-        }
         if (this.panel) {
             this.panel.remove();
             this.panel = null;
@@ -5214,13 +4971,9 @@ class Sidebar {
                 <div class="tc-sidebar-title">模块</div>
                 <div class="tc-nav-list">
                     <div class="tc-nav-item active" data-view="tasks">
-                        <span class="tc-nav-icon">✅</span>
-                        <span class="tc-nav-label">协作清单</span>
+                        <span class="tc-nav-icon">📋</span>
+                        <span class="tc-nav-label">任务中心</span>
                         <span class="tc-nav-badge" id="tc-task-count">0</span>
-                    </div>
-                    <div class="tc-nav-item" data-view="help-center">
-                        <span class="tc-nav-icon">🆘</span>
-                        <span class="tc-nav-label">求助中心</span>
                     </div>
                     <div class="tc-nav-item" data-view="plans">
                         <span class="tc-nav-icon">📚</span>
@@ -5261,7 +5014,11 @@ class Sidebar {
             <div class="tc-sidebar-section tc-sidebar-actions">
                 <button class="tc-btn tc-btn-primary tc-btn-block" id="tc-create-project-btn">
                     + 创建新项目
-                </button>            </div>
+                </button>
+                <button class="tc-btn tc-btn-secondary tc-btn-block" id="tc-join-project-btn">
+                    通过邀请码加入
+                </button>
+            </div>
         `;
 
         this.panel.setSidebarContent(html);
@@ -5279,12 +5036,16 @@ class Sidebar {
                 <div class="tc-empty-icon">🚀</div>
                 <div class="tc-empty-title">欢迎使用团队协作</div>
                 <div class="tc-empty-description">
-                    创建一个新项目，然后让队友把用户名发给你；你可以在项目设置中直接按用户名把他们加入项目。
+                    创建一个新项目，或通过邀请码加入已有项目，开始团队协作之旅。
                 </div>
                 <div class="tc-empty-actions">
                     <button class="tc-btn tc-btn-primary" id="tc-create-project-btn">
                         创建新项目
-                    </button>                    <button class="tc-btn tc-btn-secondary" id="tc-import-btn">
+                    </button>
+                    <button class="tc-btn tc-btn-secondary" id="tc-join-project-btn">
+                        通过邀请码加入
+                    </button>
+                    <button class="tc-btn tc-btn-secondary" id="tc-import-btn">
                         导入项目
                     </button>
                 </div>
@@ -5321,6 +5082,12 @@ class Sidebar {
         const createBtn = document.getElementById('tc-create-project-btn');
         if (createBtn) {
             createBtn.addEventListener('click', () => this.showCreateProjectModal());
+        }
+
+        // 加入项目按钮
+        const joinBtn = document.getElementById('tc-join-project-btn');
+        if (joinBtn) {
+            joinBtn.addEventListener('click', () => this.showJoinProjectModal());
         }
 
         // 导入项目按钮
@@ -5475,7 +5242,7 @@ class Sidebar {
     }
 
     /**
-     * 显示项目创建成功提示
+     * 显示邀请码弹窗
      * @param {Object} project - 项目对象
      */
     showInviteCodeModal(project) {
@@ -5489,21 +5256,32 @@ class Sidebar {
                 </div>
                 <div class="tc-modal-body">
                     <div class="tc-invite-code-display">
-                        <div class="tc-invite-label">下一步</div>
-                        <div class="tc-project-created-name">${window.TCUtils.escapeHtml(project.name)}</div>
-                        <div class="tc-invite-hint">让队友把他们的用户名发给你，然后进入「项目设置 → 按用户名添加成员」，即可直接把他们加入项目。</div>
+                        <div class="tc-invite-label">邀请码</div>
+                        <div class="tc-invite-code">${project.inviteCode}</div>
+                        <div class="tc-invite-hint">将此邀请码分享给团队成员，他们可以通过此码加入项目</div>
                     </div>
                 </div>
                 <div class="tc-modal-footer">
-                    <button class="tc-btn tc-btn-primary tc-modal-cancel">知道了</button>
+                    <button class="tc-btn tc-btn-secondary" id="tc-copy-invite-code">复制邀请码</button>
+                    <button class="tc-btn tc-btn-primary tc-modal-cancel">完成</button>
                 </div>
             </div>
         `;
 
         document.body.appendChild(inviteModal);
 
+        // 关闭按钮
         inviteModal.querySelector('.tc-modal-close').addEventListener('click', () => inviteModal.remove());
         inviteModal.querySelector('.tc-modal-cancel').addEventListener('click', () => inviteModal.remove());
+
+        // 复制邀请码
+        inviteModal.querySelector('#tc-copy-invite-code').addEventListener('click', () => {
+            navigator.clipboard.writeText(project.inviteCode).then(() => {
+                this.panel.api.ui.showToast('邀请码已复制到剪贴板', 'success');
+            }).catch(() => {
+                this.panel.api.ui.showToast('复制失败，请手动复制', 'error');
+            });
+        });
     }
 
     /**
@@ -5520,13 +5298,13 @@ class Sidebar {
                 </div>
                 <div class="tc-modal-body">
                     <div class="tc-form-group">
-                        <label class="tc-form-label">邀请码 / 邀请口令 *</label>
-                        <textarea class="tc-form-textarea" id="tc-invite-code" 
-                               placeholder="粘贴 6 位邀请码，或完整邀请口令" rows="3"
-                               style="text-transform: uppercase;"></textarea>
+                        <label class="tc-form-label">邀请码 *</label>
+                        <input type="text" class="tc-form-input" id="tc-invite-code" 
+                               placeholder="输入6位邀请码" maxlength="6" 
+                               style="text-transform: uppercase; letter-spacing: 4px; font-size: 18px; text-align: center;">
                     </div>
                     <div class="tc-form-hint">
-                        支持 6 位邀请码，也支持直接粘贴完整邀请口令
+                        邀请码由项目管理员提供，通常为6位字母和数字组合
                     </div>
                 </div>
                 <div class="tc-modal-footer">
@@ -5544,10 +5322,10 @@ class Sidebar {
 
         // 确认加入
         modal.querySelector('#tc-confirm-join').addEventListener('click', async () => {
-            const inviteCode = document.getElementById('tc-invite-code').value.trim();
+            const inviteCode = document.getElementById('tc-invite-code').value.trim().toUpperCase();
 
-            if (!inviteCode) {
-                this.panel.api.ui.showToast('请输入邀请码或邀请口令', 'warning');
+            if (!inviteCode || inviteCode.length !== 6) {
+                this.panel.api.ui.showToast('请输入6位邀请码', 'warning');
                 return;
             }
 
@@ -5752,9 +5530,21 @@ class TaskBoard {
     async init(projectId, userId) {
         this.currentProjectId = projectId;
         this.currentUserId = userId;
+        await this.loadProjectMembers();
         await this.loadTasks();
         this.render();
         this.bindEvents();
+    }
+
+    async loadProjectMembers() {
+        if (!this.currentProjectId || !window.tcPlugin?.projectService) return;
+        try {
+            const project = await window.tcPlugin.projectService.getProject(this.currentProjectId);
+            this.projectMembers = Array.isArray(project?.members) ? project.members : [];
+        } catch (error) {
+            console.error('[TaskList] 加载项目成员失败:', error);
+            this.projectMembers = [];
+        }
     }
 
     /**
@@ -5866,12 +5656,6 @@ class TaskBoard {
                             <span class="tc-task-assignees">👤 ${task.assigneeIds.length}</span>
                         ` : ''}
                     </div>
-                    ${(task.checklist && task.checklist.length > 0) ? `
-                        <div class="tc-inline-progress-row">
-                            <div class="tc-progress-bar"><div class="tc-progress-fill" style="width: ${task.progress || 0}%"></div></div>
-                            <div class="tc-progress-text">${task.progress || 0}% · ${(task.checklist || []).filter(item => item.done).length}/${(task.checklist || []).length}</div>
-                        </div>
-                    ` : ''}
                 </div>
             </div>
         `;
@@ -5981,7 +5765,7 @@ class TaskBoard {
         // 构建成员选项
         const memberOptions = this.projectMembers.map(m => `
             <label class="tc-checkbox-label">
-                <input type="checkbox" class="tc-assignee-checkbox" value="${m.userId}">
+                <input type="checkbox" class="tc-assignee-checkbox" value="${m.userId}" ${m.userId === this.currentUserId ? 'checked' : ''}>
                 <span>${m.userId}</span>
             </label>
         `).join('');
@@ -6036,26 +5820,6 @@ class TaskBoard {
                         <input type="text" class="tc-form-input" id="tc-task-tags" 
                                placeholder="例如：前端, 优化, 紧急">
                     </div>
-                    <div class="tc-form-group">
-                        <label class="tc-form-label">任务清单（复选项）</label>
-                        <div class="tc-checklist-builder">
-                            <div class="tc-checklist-builder-list" id="tc-checklist-builder-list">
-                                <div class="tc-checklist-builder-row">
-                                    <input type="checkbox" disabled>
-                                    <input type="text" class="tc-form-input tc-checklist-input" placeholder="输入一个清单项，例如：联调接口返回结构">
-                                    <button type="button" class="tc-btn tc-btn-secondary tc-btn-sm tc-checklist-remove">删除</button>
-                                </div>
-                            </div>
-                            <button type="button" class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-add-checklist-item">+ 添加清单项</button>
-                            <div class="tc-form-help">创建后会显示为可勾选复选框，适合拆分执行步骤。</div>
-                        </div>
-                    </div>
-                    <div class="tc-form-group">
-                        <label class="tc-form-label">求助说明（可选）</label>
-                        <textarea class="tc-form-textarea" id="tc-task-help-message" 
-                                  placeholder="如果这项任务需要协作支持，可写清阻塞点与求助背景" rows="3"></textarea>
-                    </div>
-                    <label class="tc-checkbox-line"><input type="checkbox" id="tc-task-help-requested"> <span>创建后立即进入求助状态</span></label>
                 </div>
                 <div class="tc-modal-footer">
                     <button class="tc-btn tc-btn-secondary tc-modal-cancel">取消</button>
@@ -6065,35 +5829,6 @@ class TaskBoard {
         `;
 
         document.body.appendChild(modal);
-
-        const checklistList = modal.querySelector('#tc-checklist-builder-list');
-        const bindChecklistRow = (row) => {
-            row.querySelector('.tc-checklist-remove').addEventListener('click', () => {
-                if (checklistList.children.length === 1) {
-                    const input = row.querySelector('.tc-checklist-input');
-                    if (input) input.value = '';
-                    return;
-                }
-                row.remove();
-            });
-        };
-
-        checklistList.querySelectorAll('.tc-checklist-builder-row').forEach(bindChecklistRow);
-        const addChecklistBtn = modal.querySelector('#tc-add-checklist-item');
-        if (addChecklistBtn) {
-            addChecklistBtn.addEventListener('click', () => {
-                const row = document.createElement('div');
-                row.className = 'tc-checklist-builder-row';
-                row.innerHTML = `
-                    <input type="checkbox" disabled>
-                    <input type="text" class="tc-form-input tc-checklist-input" placeholder="输入一个清单项，例如：联调接口返回结构">
-                    <button type="button" class="tc-btn tc-btn-secondary tc-btn-sm tc-checklist-remove">删除</button>
-                `;
-                checklistList.appendChild(row);
-                bindChecklistRow(row);
-                row.querySelector('.tc-checklist-input')?.focus();
-            });
-        }
 
         // 关闭按钮
         modal.querySelector('.tc-modal-close').addEventListener('click', () => modal.remove());
@@ -6107,11 +5842,6 @@ class TaskBoard {
             const dueDate = document.getElementById('tc-task-due-date').value;
             const tagsStr = document.getElementById('tc-task-tags').value.trim();
             const visibility = document.getElementById('tc-task-visibility').value;
-            const helpMessage = document.getElementById('tc-task-help-message').value.trim();
-            const helpRequested = document.getElementById('tc-task-help-requested').checked;
-            const checklist = Array.from(modal.querySelectorAll('.tc-checklist-input'))
-                .map(input => ({ text: input.value.trim(), done: false }))
-                .filter(item => item.text);
 
             // 获取选中的负责人
             const assigneeCheckboxes = document.querySelectorAll('.tc-assignee-checkbox:checked');
@@ -6133,11 +5863,7 @@ class TaskBoard {
                     dueDate: dueDate ? new Date(dueDate).getTime() : null,
                     tags,
                     assigneeIds,
-                    visibility,
-                    helpRequested,
-                    helpStatus: helpRequested ? 'open' : 'none',
-                    helpMessage,
-                    checklist
+                    visibility
                 }, this.currentUserId);
 
                 this.panel.api.ui.showToast('任务创建成功', 'success');
@@ -6197,152 +5923,124 @@ window.TCTaskBoard = TaskBoard;
  */
 
 class TaskList {
-    constructor(panel, taskService, indexManager, eventBus, projectService) {
+    constructor(panel, taskService, indexManager, eventBus) {
         this.panel = panel;
         this.taskService = taskService;
         this.indexManager = indexManager;
         this.eventBus = eventBus;
-        this.projectService = projectService;
         this.currentProjectId = null;
         this.currentUserId = null;
         this.tasks = [];
-        this.allTasks = [];
         this.projectMembers = [];
-        this.filters = { keyword: '', status: '', priority: '', helpOnly: false, mineOnly: false };
+        this.filters = {};
         this.sortBy = 'updatedAt';
         this.sortOrder = 'desc';
     }
 
+    /**
+     * 初始化
+     * @param {string} projectId - 项目 ID
+     * @param {string} userId - 用户 ID
+     */
     async init(projectId, userId) {
         this.currentProjectId = projectId;
         this.currentUserId = userId;
-        await this.loadProjectMembers();
         await this.loadTasks();
         this.render();
         this.bindEvents();
     }
 
-    async loadProjectMembers() {
-        if (!this.currentProjectId) return;
-        try {
-            const project = await this.projectService.getProject(this.currentProjectId);
-            this.projectMembers = project?.members || [];
-        } catch (error) {
-            console.error('[TaskList] 加载项目成员失败:', error);
-            this.projectMembers = [];
-        }
-    }
-
+    /**
+     * 加载任务
+     */
     async loadTasks() {
         if (!this.currentProjectId) return;
-        this.allTasks = await this.taskService.getProjectTasks(this.currentProjectId, this.currentUserId);
+        this.tasks = await this.taskService.getProjectTasks(this.currentProjectId, this.currentUserId);
         this.applyFilters();
     }
 
+    /**
+     * 应用过滤和排序
+     */
     applyFilters() {
-        let filtered = [...this.allTasks];
+        let filtered = [...this.tasks];
 
+        // 状态过滤
         if (this.filters.status) {
             filtered = filtered.filter(t => t.status === this.filters.status);
         }
 
+        // 优先级过滤
         if (this.filters.priority) {
             filtered = filtered.filter(t => t.priority === this.filters.priority);
         }
 
+        // 关键词搜索
         if (this.filters.keyword) {
             const keyword = this.filters.keyword.toLowerCase();
             filtered = filtered.filter(t =>
                 t.title.toLowerCase().includes(keyword) ||
-                t.description.toLowerCase().includes(keyword) ||
-                (t.helpMessage || '').toLowerCase().includes(keyword)
+                t.description.toLowerCase().includes(keyword)
             );
         }
 
-        if (this.filters.helpOnly) {
-            filtered = filtered.filter(t => t.helpRequested || (t.helpStatus && t.helpStatus !== 'none'));
-        }
-
-        if (this.filters.mineOnly) {
-            filtered = filtered.filter(t =>
-                t.createdBy === this.currentUserId ||
-                (t.assigneeIds || []).includes(this.currentUserId) ||
-                (t.helperIds || []).includes(this.currentUserId)
-            );
-        }
-
+        // 排序
         filtered.sort((a, b) => {
             let aVal = a[this.sortBy];
             let bVal = b[this.sortBy];
 
             if (this.sortBy === 'priority') {
-                const priorityOrder = { urgent: 4, high: 3, medium: 2, low: 1 };
+                const priorityOrder = { 'urgent': 4, 'high': 3, 'medium': 2, 'low': 1 };
                 aVal = priorityOrder[a.priority] || 0;
                 bVal = priorityOrder[b.priority] || 0;
             }
 
             if (this.sortOrder === 'asc') {
                 return aVal > bVal ? 1 : -1;
+            } else {
+                return aVal < bVal ? 1 : -1;
             }
-            return aVal < bVal ? 1 : -1;
         });
 
         this.tasks = filtered;
     }
 
-    getStats() {
-        const now = Date.now();
-        return {
-            total: this.allTasks.length,
-            doing: this.allTasks.filter(t => t.status === 'doing').length,
-            review: this.allTasks.filter(t => t.status === 'review').length,
-            help: this.allTasks.filter(t => t.helpRequested || (t.helpStatus && t.helpStatus !== 'none')).length,
-            overdue: this.allTasks.filter(t => t.dueDate && t.dueDate < now && t.status !== 'done').length
-        };
-    }
-
+    /**
+     * 渲染列表
+     */
     render() {
         const C = window.TCConstants;
-        const stats = this.getStats();
         const html = `
-            <div class="tc-task-list-view tc-team-list-view">
+            <div class="tc-task-list-view">
                 <div class="tc-list-header">
-                    <div>
-                        <div class="tc-list-title">协作清单</div>
-                        <div class="tc-list-subtitle">默认以列表方式管理团队开发任务、讨论和求助。</div>
-                    </div>
+                    <div class="tc-list-title">任务列表</div>
                     <div class="tc-list-actions">
-                        <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-add-task-btn">+ 新建任务</button>
-                        <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-add-help-task-btn">🆘 新建求助</button>
-                        <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-switch-view-btn">📊 看板视图</button>
+                        <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-add-task-btn">
+                            + 新建任务
+                        </button>
+                        <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-switch-view-btn">
+                            📊 看板视图
+                        </button>
                     </div>
                 </div>
-
-                <div class="tc-team-stats">
-                    <div class="tc-stat-card"><span class="tc-stat-label">总任务</span><span class="tc-stat-value">${stats.total}</span></div>
-                    <div class="tc-stat-card"><span class="tc-stat-label">进行中</span><span class="tc-stat-value">${stats.doing}</span></div>
-                    <div class="tc-stat-card"><span class="tc-stat-label">待支援</span><span class="tc-stat-value">${stats.help}</span></div>
-                    <div class="tc-stat-card"><span class="tc-stat-label">已逾期</span><span class="tc-stat-value">${stats.overdue}</span></div>
-                </div>
-
-                <div class="tc-list-filters tc-team-filters">
-                    <input type="text" class="tc-search-input" id="tc-task-search" placeholder="搜索任务 / 评论上下文 / 求助说明..." value="${window.TCUtils.escapeHtml(this.filters.keyword || '')}">
+                
+                <div class="tc-list-filters">
+                    <input type="text" class="tc-search-input" id="tc-task-search" 
+                           placeholder="搜索任务...">
                     <select class="tc-filter-select" id="tc-status-filter">
                         <option value="">全部状态</option>
-                        <option value="${C.TASK_STATUS.TODO}" ${this.filters.status === C.TASK_STATUS.TODO ? 'selected' : ''}>待办</option>
-                        <option value="${C.TASK_STATUS.DOING}" ${this.filters.status === C.TASK_STATUS.DOING ? 'selected' : ''}>进行中</option>
-                        <option value="${C.TASK_STATUS.REVIEW}" ${this.filters.status === C.TASK_STATUS.REVIEW ? 'selected' : ''}>审核中</option>
-                        <option value="${C.TASK_STATUS.DONE}" ${this.filters.status === C.TASK_STATUS.DONE ? 'selected' : ''}>已完成</option>
+                        <option value="${C.TASK_STATUS.TODO}">待办</option>
+                        <option value="${C.TASK_STATUS.DOING}">进行中</option>
+                        <option value="${C.TASK_STATUS.REVIEW}">审核中</option>
+                        <option value="${C.TASK_STATUS.DONE}">已完成</option>
                     </select>
                     <select class="tc-filter-select" id="tc-priority-filter">
                         <option value="">全部优先级</option>
-                        <option value="${C.TASK_PRIORITY.URGENT}" ${this.filters.priority === C.TASK_PRIORITY.URGENT ? 'selected' : ''}>紧急</option>
-                        <option value="${C.TASK_PRIORITY.HIGH}" ${this.filters.priority === C.TASK_PRIORITY.HIGH ? 'selected' : ''}>高</option>
-                        <option value="${C.TASK_PRIORITY.MEDIUM}" ${this.filters.priority === C.TASK_PRIORITY.MEDIUM ? 'selected' : ''}>中</option>
-                        <option value="${C.TASK_PRIORITY.LOW}" ${this.filters.priority === C.TASK_PRIORITY.LOW ? 'selected' : ''}>低</option>
+                        <option value="${C.TASK_PRIORITY.URGENT}">紧急</option>
+                        <option value="${C.TASK_PRIORITY.HIGH}">高</option>
+                        <option value="${C.TASK_PRIORITY.MEDIUM}">中</option>
+                        <option value="${C.TASK_PRIORITY.LOW}">低</option>
                     </select>
-                    <button class="tc-filter-chip ${this.filters.mineOnly ? 'active' : ''}" id="tc-filter-mine">我的任务</button>
-                    <button class="tc-filter-chip ${this.filters.helpOnly ? 'active' : ''}" id="tc-filter-help">仅看待支援</button>
                 </div>
 
                 <div class="tc-list-content">
@@ -6354,20 +6052,22 @@ class TaskList {
         this.panel.setContent(html);
     }
 
+    /**
+     * 渲染空状态
+     */
     renderEmpty() {
         return `
             <div class="tc-list-empty">
-                <div class="tc-empty-icon">🧩</div>
-                <div class="tc-empty-text">当前筛选下没有任务</div>
-                <div class="tc-empty-subtext">你可以新建开发任务，或者新建一个需要团队支援的求助项。</div>
-                <div class="tc-empty-inline-actions">
-                    <button class="tc-btn tc-btn-primary" id="tc-add-task-btn-empty">创建任务</button>
-                    <button class="tc-btn tc-btn-secondary" id="tc-add-help-task-btn-empty">新建求助</button>
-                </div>
+                <div class="tc-empty-icon">📋</div>
+                <div class="tc-empty-text">暂无任务</div>
+                <button class="tc-btn tc-btn-primary" id="tc-add-task-btn-empty">创建第一个任务</button>
             </div>
         `;
     }
 
+    /**
+     * 渲染任务项
+     */
     renderTaskItems() {
         const C = window.TCConstants;
         const statusLabels = {
@@ -6384,67 +6084,55 @@ class TaskList {
             [C.TASK_STATUS.DONE]: '#22c55e'
         };
 
-        const helpLabels = { none: '无', open: '待响应', claimed: '处理中', resolved: '已解决' };
+        const priorityColors = {
+            'low': '#6b7280',
+            'medium': '#3b82f6',
+            'high': '#f59e0b',
+            'urgent': '#ef4444'
+        };
 
         return `
-            <div class="tc-list-items tc-team-list-items">
-                ${this.tasks.map(task => {
-                    const assignees = (task.assigneeIds || []).length > 0 ? task.assigneeIds.join(', ') : '未分配';
-                    const helpers = (task.helperIds || []).length > 0 ? task.helperIds.join(', ') : '暂无';
-                    const hasComments = task.threadIds && task.threadIds.length > 0;
-                    return `
-                        <div class="tc-list-item tc-team-task-item" data-task-id="${task.id}">
-                            <div class="tc-list-item-left">
-                                <div class="tc-task-status-dot" style="background: ${statusColors[task.status]}"></div>
-                                <div class="tc-task-info">
-                                    <div class="tc-task-title-row">
-                                        <div class="tc-task-title">${window.TCUtils.escapeHtml(task.title)}</div>
-                                        ${task.helpRequested ? `<span class="tc-help-badge ${task.helpStatus || 'open'}">🆘 ${helpLabels[task.helpStatus || 'open']}</span>` : ''}
-                                        ${task.taskType === 'help' ? '<span class="tc-subtle-badge">求助任务</span>' : '<span class="tc-subtle-badge">开发任务</span>'}
-                                    </div>
-                                    ${task.description ? `<div class="tc-task-desc">${window.TCUtils.escapeHtml(window.TCUtils.truncateText(task.description, 120))}</div>` : ''}
-                                    ${task.helpMessage ? `<div class="tc-help-summary">求助说明：${window.TCUtils.escapeHtml(window.TCUtils.truncateText(task.helpMessage, 120))}</div>` : ''}
-                                    <div class="tc-task-meta-row">
-                                        <span>负责人：${window.TCUtils.escapeHtml(assignees)}</span>
-                                        <span>协助人：${window.TCUtils.escapeHtml(helpers)}</span>
-                                        <span>更新于：${window.TCUtils.formatRelativeTime(task.updatedAt)}</span>
-                                        <span>${hasComments ? '💬 已有讨论' : '💬 暂无讨论'}</span>
-                                    </div>
-                                    ${(task.checklist && task.checklist.length > 0) ? `
-                                        <div class="tc-inline-progress-row">
-                                            <div class="tc-progress-bar"><div class="tc-progress-fill" style="width: ${task.progress || 0}%"></div></div>
-                                            <div class="tc-progress-text">清单进度 ${task.progress || 0}% · ${(task.checklist || []).filter(item => item.done).length}/${(task.checklist || []).length}</div>
-                                        </div>
-                                    ` : ''}
-                                    ${task.tags && task.tags.length > 0 ? `<div class="tc-inline-tags">${task.tags.slice(0, 4).map(tag => `<span class="tc-tag">${window.TCUtils.escapeHtml(tag)}</span>`).join('')}</div>` : ''}
-                                </div>
-                            </div>
-                            <div class="tc-list-item-right tc-team-task-right">
-                                <span class="tc-priority-badge" style="background: ${task.priority === 'urgent' ? '#ef4444' : task.priority === 'high' ? '#f59e0b' : task.priority === 'medium' ? '#3b82f6' : '#6b7280'}">${window.TCUtils.getPriorityLabel(task.priority)}</span>
-                                ${task.dueDate ? `<span class="tc-due-date ${this.taskService.isOverdue(task) ? 'overdue' : ''}">${window.TCUtils.formatDate(task.dueDate)}</span>` : ''}
-                                <span class="tc-status-badge" style="background: ${statusColors[task.status]}">${statusLabels[task.status]}</span>
-                                <div class="tc-item-actions">
-                                    <button class="tc-mini-btn tc-open-task-btn" data-task-id="${task.id}">打开</button>
-                                    <button class="tc-mini-btn tc-open-comments-btn" data-task-id="${task.id}">评论</button>
-                                    ${task.helpRequested ? `<button class="tc-mini-btn tc-open-help-btn" data-task-id="${task.id}">跟进求助</button>` : `<button class="tc-mini-btn tc-request-help-btn" data-task-id="${task.id}">发起求助</button>`}
-                                </div>
+            <div class="tc-list-items">
+                ${this.tasks.map(task => `
+                    <div class="tc-list-item" data-task-id="${task.id}">
+                        <div class="tc-list-item-left">
+                            <div class="tc-task-status-dot" style="background: ${statusColors[task.status]}"></div>
+                            <div class="tc-task-info">
+                                <div class="tc-task-title">${window.TCUtils.escapeHtml(task.title)}</div>
+                                ${task.description ? `
+                                    <div class="tc-task-desc">${window.TCUtils.escapeHtml(window.TCUtils.truncateText(task.description, 80))}</div>
+                                ` : ''}
                             </div>
                         </div>
-                    `;
-                }).join('')}
+                        <div class="tc-list-item-right">
+                            <span class="tc-priority-badge" style="background: ${priorityColors[task.priority]}">
+                                ${window.TCUtils.getPriorityLabel(task.priority)}
+                            </span>
+                            ${task.dueDate ? `
+                                <span class="tc-due-date ${this.taskService.isOverdue(task) ? 'overdue' : ''}">
+                                    ${window.TCUtils.formatDate(task.dueDate)}
+                                </span>
+                            ` : ''}
+                            <span class="tc-status-badge" style="background: ${statusColors[task.status]}">
+                                ${statusLabels[task.status]}
+                            </span>
+                        </div>
+                    </div>
+                `).join('')}
             </div>
         `;
     }
 
+    /**
+     * 绑定事件
+     */
     bindEvents() {
+        // 新建任务按钮
         document.querySelectorAll('#tc-add-task-btn, #tc-add-task-btn-empty').forEach(btn => {
-            btn.addEventListener('click', () => this.showCreateTaskModal(false));
+            btn.addEventListener('click', () => this.showCreateTaskModal());
         });
 
-        document.querySelectorAll('#tc-add-help-task-btn, #tc-add-help-task-btn-empty').forEach(btn => {
-            btn.addEventListener('click', () => this.showCreateTaskModal(true));
-        });
-
+        // 切换视图按钮
         const switchBtn = document.getElementById('tc-switch-view-btn');
         if (switchBtn) {
             switchBtn.addEventListener('click', () => {
@@ -6452,149 +6140,99 @@ class TaskList {
             });
         }
 
+        // 搜索框
         const searchInput = document.getElementById('tc-task-search');
         if (searchInput) {
             searchInput.addEventListener('input', window.TCUtils.debounce(async (e) => {
                 this.filters.keyword = e.target.value;
-                this.applyFilters();
+                await this.loadTasks();
                 this.render();
                 this.bindEvents();
-            }, 250));
+            }, 300));
         }
 
+        // 状态过滤
         const statusFilter = document.getElementById('tc-status-filter');
         if (statusFilter) {
             statusFilter.addEventListener('change', async (e) => {
-                this.filters.status = e.target.value || '';
-                this.applyFilters();
+                this.filters.status = e.target.value || null;
+                await this.loadTasks();
                 this.render();
                 this.bindEvents();
             });
         }
 
+        // 优先级过滤
         const priorityFilter = document.getElementById('tc-priority-filter');
         if (priorityFilter) {
             priorityFilter.addEventListener('change', async (e) => {
-                this.filters.priority = e.target.value || '';
-                this.applyFilters();
+                this.filters.priority = e.target.value || null;
+                await this.loadTasks();
                 this.render();
                 this.bindEvents();
             });
         }
 
-        const mineBtn = document.getElementById('tc-filter-mine');
-        if (mineBtn) {
-            mineBtn.addEventListener('click', () => {
-                this.filters.mineOnly = !this.filters.mineOnly;
-                this.applyFilters();
-                this.render();
-                this.bindEvents();
-            });
-        }
-
-        const helpBtn = document.getElementById('tc-filter-help');
-        if (helpBtn) {
-            helpBtn.addEventListener('click', () => {
-                this.filters.helpOnly = !this.filters.helpOnly;
-                this.applyFilters();
-                this.render();
-                this.bindEvents();
-            });
-        }
-
+        // 任务项点击
         document.querySelectorAll('.tc-list-item').forEach(item => {
             item.addEventListener('click', () => {
                 const taskId = item.dataset.taskId;
                 this.showTaskDetail(taskId);
             });
         });
-
-        document.querySelectorAll('.tc-open-task-btn, .tc-open-comments-btn, .tc-open-help-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.showTaskDetail(btn.dataset.taskId);
-            });
-        });
-
-        document.querySelectorAll('.tc-request-help-btn').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                await this.quickRequestHelp(btn.dataset.taskId);
-            });
-        });
     }
 
-    showCreateTaskModal(asHelpTask = false) {
+    /**
+     * 显示创建任务对话框
+     */
+    showCreateTaskModal() {
         const C = window.TCConstants;
         const modal = document.createElement('div');
         modal.className = 'tc-modal open';
-
-        const memberOptions = this.projectMembers.map(m => `
+        const memberOptions = (this.projectMembers || []).map(m => `
             <label class="tc-checkbox-label">
-                <input type="checkbox" class="tc-assignee-checkbox" value="${m.userId}">
-                <span>${m.userId}</span>
+                <input type="checkbox" class="tc-assignee-checkbox" value="${m.userId}" ${window.TCUtils.normalizeUserId(m.userId) === window.TCUtils.normalizeUserId(this.currentUserId) ? 'checked' : ''}>
+                <span>${m.userId}${window.TCUtils.normalizeUserId(m.userId) === window.TCUtils.normalizeUserId(this.currentUserId) ? ' (我)' : ''}</span>
             </label>
         `).join('');
-
         modal.innerHTML = `
-            <div class="tc-modal-content tc-modal-content-lg">
+            <div class="tc-modal-content">
                 <div class="tc-modal-header">
-                    <span class="tc-modal-title">${asHelpTask ? '新建求助任务' : '新建任务'}</span>
+                    <span class="tc-modal-title">新建任务</span>
                     <button class="tc-modal-close">×</button>
                 </div>
                 <div class="tc-modal-body">
                     <div class="tc-form-group">
                         <label class="tc-form-label">任务标题 *</label>
-                        <input type="text" class="tc-form-input" id="tc-task-title" placeholder="输入任务标题" maxlength="100">
+                        <input type="text" class="tc-form-input" id="tc-task-title" 
+                               placeholder="输入任务标题" maxlength="100">
                     </div>
                     <div class="tc-form-group">
                         <label class="tc-form-label">任务描述</label>
-                        <textarea class="tc-form-textarea" id="tc-task-description" placeholder="描述上下文、预期结果、背景信息（支持 Markdown）" rows="4"></textarea>
-                    </div>
-                    <div class="tc-form-group">
-                        <label class="tc-form-label">求助说明</label>
-                        <textarea class="tc-form-textarea" id="tc-task-help-message" placeholder="这个字段很适合写：卡在哪里、希望谁帮忙、需要什么输出" rows="3">${asHelpTask ? '当前任务需要团队支援，请补充上下文与阻塞点。' : ''}</textarea>
+                        <textarea class="tc-form-textarea" id="tc-task-description" 
+                                  placeholder="输入任务描述（支持Markdown）" rows="4"></textarea>
                     </div>
                     <div class="tc-form-row">
-                        <div class="tc-form-group" style="flex:1;">
+                        <div class="tc-form-group" style="flex: 1;">
                             <label class="tc-form-label">优先级</label>
                             <select class="tc-form-select" id="tc-task-priority">
                                 <option value="${C.TASK_PRIORITY.LOW}">低</option>
-                                <option value="${C.TASK_PRIORITY.MEDIUM}" ${!asHelpTask ? 'selected' : ''}>中</option>
-                                <option value="${C.TASK_PRIORITY.HIGH}" ${asHelpTask ? 'selected' : ''}>高</option>
+                                <option value="${C.TASK_PRIORITY.MEDIUM}" selected>中</option>
+                                <option value="${C.TASK_PRIORITY.HIGH}">高</option>
                                 <option value="${C.TASK_PRIORITY.URGENT}">紧急</option>
                             </select>
                         </div>
-                        <div class="tc-form-group" style="flex:1;">
+                        <div class="tc-form-group" style="flex: 1;">
                             <label class="tc-form-label">截止日期</label>
                             <input type="date" class="tc-form-input" id="tc-task-due-date">
                         </div>
                     </div>
                     <div class="tc-form-group">
                         <label class="tc-form-label">负责人（可多选）</label>
-                        <div class="tc-assignee-list" id="tc-task-assignees">${memberOptions || '<span class="tc-placeholder">暂无成员可选</span>'}</div>
-                    </div>
-                    <div class="tc-form-row">
-                        <div class="tc-form-group" style="flex:1;">
-                            <label class="tc-form-label">可见性</label>
-                            <select class="tc-form-select" id="tc-task-visibility">
-                                <option value="${C.VISIBILITY.PROJECT}">项目成员可见</option>
-                                <option value="${C.VISIBILITY.PRIVATE}">仅相关人员可见</option>
-                            </select>
-                        </div>
-                        <div class="tc-form-group" style="flex:1;">
-                            <label class="tc-form-label">任务类型</label>
-                            <select class="tc-form-select" id="tc-task-type">
-                                <option value="task" ${!asHelpTask ? 'selected' : ''}>开发任务</option>
-                                <option value="help" ${asHelpTask ? 'selected' : ''}>求助任务</option>
-                            </select>
+                        <div class="tc-assignee-list" id="tc-task-assignees">
+                            ${memberOptions || '<span class="tc-placeholder">暂无成员可选</span>'}
                         </div>
                     </div>
-                    <div class="tc-form-group">
-                        <label class="tc-form-label">标签（逗号分隔）</label>
-                        <input type="text" class="tc-form-input" id="tc-task-tags" placeholder="例如：前端, bug, 接口联调, blocker">
-                    </div>
-                    <label class="tc-checkbox-line"><input type="checkbox" id="tc-task-help-requested" ${asHelpTask ? 'checked' : ''}> <span>创建后立即进入求助状态</span></label>
                 </div>
                 <div class="tc-modal-footer">
                     <button class="tc-btn tc-btn-secondary tc-modal-cancel">取消</button>
@@ -6604,19 +6242,15 @@ class TaskList {
         `;
 
         document.body.appendChild(modal);
+
         modal.querySelector('.tc-modal-close').addEventListener('click', () => modal.remove());
         modal.querySelector('.tc-modal-cancel').addEventListener('click', () => modal.remove());
 
         modal.querySelector('#tc-confirm-create').addEventListener('click', async () => {
             const title = document.getElementById('tc-task-title').value.trim();
             const description = document.getElementById('tc-task-description').value.trim();
-            const helpMessage = document.getElementById('tc-task-help-message').value.trim();
             const priority = document.getElementById('tc-task-priority').value;
             const dueDate = document.getElementById('tc-task-due-date').value;
-            const visibility = document.getElementById('tc-task-visibility').value;
-            const taskType = document.getElementById('tc-task-type').value;
-            const helpRequested = document.getElementById('tc-task-help-requested').checked;
-            const tagsStr = document.getElementById('tc-task-tags').value.trim();
             const assigneeIds = Array.from(document.querySelectorAll('.tc-assignee-checkbox:checked')).map(cb => cb.value);
 
             if (!title) {
@@ -6625,59 +6259,30 @@ class TaskList {
             }
 
             try {
-                const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
-                const task = await this.taskService.createTask({
+                await this.taskService.createTask({
                     projectId: this.currentProjectId,
                     title,
                     description,
                     priority,
-                    dueDate: dueDate ? new Date(dueDate).getTime() : null,
-                    tags,
                     assigneeIds,
-                    visibility,
-                    taskType,
-                    helpRequested,
-                    helpStatus: helpRequested ? 'open' : 'none',
-                    helpMessage
+                    dueDate: dueDate ? new Date(dueDate).getTime() : null
                 }, this.currentUserId);
 
-                this.panel.api.ui.showToast(asHelpTask ? '求助任务创建成功' : '任务创建成功', 'success');
+                this.panel.api.ui.showToast('任务创建成功', 'success');
                 modal.remove();
                 await this.loadTasks();
                 this.render();
                 this.bindEvents();
-
-                if (helpRequested) {
-                    this.eventBus.emit('task.detail', { taskId: task.id, task });
-                }
             } catch (error) {
-                console.error('创建任务失败:', error);
                 this.panel.api.ui.showToast('创建任务失败: ' + error.message, 'error');
             }
         });
     }
 
-    async quickRequestHelp(taskId) {
-        try {
-            const task = await this.taskService.getTask(taskId, this.currentUserId);
-            if (!task) return;
-            const note = prompt('补充一下你需要什么协助（可留空）', task.helpMessage || '');
-            if (note === null) return;
-            await this.taskService.updateTask(taskId, {
-                helpRequested: true,
-                helpStatus: 'open',
-                helpMessage: note || task.helpMessage || '需要团队协助排查和推进。',
-                taskType: task.taskType || 'task'
-            }, this.currentUserId);
-            this.panel.api.ui.showToast('已标记为待支援', 'success');
-            await this.loadTasks();
-            this.render();
-            this.bindEvents();
-        } catch (error) {
-            this.panel.api.ui.showToast('发起求助失败: ' + error.message, 'error');
-        }
-    }
-
+    /**
+     * 显示任务详情
+     * @param {string} taskId - 任务 ID
+     */
     async showTaskDetail(taskId) {
         try {
             const task = await this.taskService.getTask(taskId, this.currentUserId);
@@ -6691,192 +6296,43 @@ class TaskList {
         }
     }
 
+    /**
+     * 刷新
+     */
     async refresh() {
         await this.loadTasks();
         this.render();
         this.bindEvents();
     }
 
-    destroy() {}
+    /**
+     * 销毁
+     */
+    destroy() {
+        // 清理
+    }
 }
 
 // 导出
 window.TCTaskList = TaskList;
-
-/**
- * 团队协作插件 - 求助中心
- */
-
-class HelpCenter {
-    constructor(panel, taskService, projectService, eventBus) {
-        this.panel = panel;
-        this.taskService = taskService;
-        this.projectService = projectService;
-        this.eventBus = eventBus;
-        this.currentProjectId = null;
-        this.currentUserId = null;
-        this.tasks = [];
-    }
-
-    async init(projectId, userId) {
-        this.currentProjectId = projectId;
-        this.currentUserId = userId;
-        await this.loadTasks();
-        this.render();
-        this.bindEvents();
-    }
-
-    async loadTasks() {
-        const tasks = await this.taskService.getProjectTasks(this.currentProjectId, this.currentUserId);
-        this.tasks = tasks.filter(task => task.helpRequested || (task.helpStatus && task.helpStatus !== 'none'));
-        this.tasks.sort((a, b) => b.updatedAt - a.updatedAt);
-    }
-
-    render() {
-        const html = `
-            <div class="tc-help-center-view">
-                <div class="tc-list-header">
-                    <div>
-                        <div class="tc-list-title">求助中心</div>
-                        <div class="tc-list-subtitle">集中查看卡点、阻塞、待认领事项，适合团队开发协作。</div>
-                    </div>
-                    <div class="tc-list-actions">
-                        <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-create-help-task">+ 发起求助</button>
-                        <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-back-to-list">返回清单</button>
-                    </div>
-                </div>
-                <div class="tc-help-center-content">
-                    ${this.tasks.length === 0 ? `
-                        <div class="tc-list-empty">
-                            <div class="tc-empty-icon">🤝</div>
-                            <div class="tc-empty-text">当前没有待支援任务</div>
-                            <div class="tc-empty-subtext">团队状态不错。你也可以主动发起一个新的求助项。</div>
-                        </div>
-                    ` : this.tasks.map(task => this.renderCard(task)).join('')}
-                </div>
-            </div>
-        `;
-        this.panel.setContent(html);
-    }
-
-    renderCard(task) {
-        const helpState = { open: '待响应', claimed: '处理中', resolved: '已解决', none: '无' }[task.helpStatus || 'open'];
-        const assignees = (task.assigneeIds || []).length ? task.assigneeIds.join(', ') : '未分配';
-        const helpers = (task.helperIds || []).length ? task.helperIds.join(', ') : '暂无';
-        return `
-            <div class="tc-help-card" data-task-id="${task.id}">
-                <div class="tc-help-card-top">
-                    <div>
-                        <div class="tc-help-card-title">${window.TCUtils.escapeHtml(task.title)}</div>
-                        <div class="tc-help-card-meta">创建者：${window.TCUtils.escapeHtml(task.createdBy)} · 负责人：${window.TCUtils.escapeHtml(assignees)}</div>
-                    </div>
-                    <span class="tc-help-badge ${task.helpStatus || 'open'}">${helpState}</span>
-                </div>
-                <div class="tc-help-card-body">
-                    <div class="tc-help-card-message">${window.TCUtils.escapeHtml(task.helpMessage || task.description || '未填写求助说明')}</div>
-                    <div class="tc-help-card-submeta">协助人：${window.TCUtils.escapeHtml(helpers)} · 更新于 ${window.TCUtils.formatRelativeTime(task.updatedAt)}</div>
-                </div>
-                <div class="tc-help-card-actions">
-                    <button class="tc-mini-btn tc-help-open-detail" data-task-id="${task.id}">查看详情</button>
-                    <button class="tc-mini-btn tc-help-claim" data-task-id="${task.id}">我来处理</button>
-                    <button class="tc-mini-btn tc-help-resolve" data-task-id="${task.id}">标记解决</button>
-                </div>
-            </div>
-        `;
-    }
-
-    bindEvents() {
-        const createBtn = document.getElementById('tc-create-help-task');
-        if (createBtn) {
-            createBtn.addEventListener('click', () => {
-                this.eventBus.emit('view.changed', { view: 'tasks', projectId: this.currentProjectId });
-                setTimeout(() => {
-                    const btn = document.getElementById('tc-add-help-task-btn');
-                    if (btn) btn.click();
-                }, 0);
-            });
-        }
-
-        const backBtn = document.getElementById('tc-back-to-list');
-        if (backBtn) {
-            backBtn.addEventListener('click', () => this.eventBus.emit('view.changed', { view: 'tasks', projectId: this.currentProjectId }));
-        }
-
-        document.querySelectorAll('.tc-help-open-detail').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const task = await this.taskService.getTask(btn.dataset.taskId, this.currentUserId);
-                if (task) this.eventBus.emit('task.detail', { taskId: task.id, task });
-            });
-        });
-
-        document.querySelectorAll('.tc-help-claim').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                await this.claimTask(btn.dataset.taskId);
-            });
-        });
-
-        document.querySelectorAll('.tc-help-resolve').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                await this.resolveTask(btn.dataset.taskId);
-            });
-        });
-    }
-
-    async claimTask(taskId) {
-        try {
-            const task = await this.taskService.getTask(taskId, this.currentUserId);
-            if (!task) return;
-            const helperIds = Array.from(new Set([...(task.helperIds || []), this.currentUserId]));
-            await this.taskService.updateTask(taskId, {
-                helpRequested: true,
-                helpStatus: 'claimed',
-                helperIds
-            }, this.currentUserId);
-            this.panel.api.ui.showToast('已认领该求助', 'success');
-            await this.loadTasks();
-            this.render();
-            this.bindEvents();
-        } catch (error) {
-            this.panel.api.ui.showToast('认领失败: ' + error.message, 'error');
-        }
-    }
-
-    async resolveTask(taskId) {
-        try {
-            await this.taskService.updateTask(taskId, {
-                helpRequested: false,
-                helpStatus: 'resolved'
-            }, this.currentUserId);
-            this.panel.api.ui.showToast('已标记为已解决', 'success');
-            await this.loadTasks();
-            this.render();
-            this.bindEvents();
-        } catch (error) {
-            this.panel.api.ui.showToast('操作失败: ' + error.message, 'error');
-        }
-    }
-}
-
-// 导出
-window.TCHelpCenter = HelpCenter;
-
 /**
  * 团队协作插件 - 任务详情面板
  */
 
 class TaskDetail {
-    constructor(panel, taskService, projectService, eventBus, commentService, markdownRenderer, notificationService) {
+    constructor(panel, taskService, projectService, eventBus, commentService, markdownRenderer, attachmentService) {
         this.panel = panel;
         this.taskService = taskService;
         this.projectService = projectService;
         this.eventBus = eventBus;
         this.commentService = commentService;
         this.markdown = markdownRenderer;
-        this.notificationService = notificationService;
+        this.attachmentService = attachmentService;
         this.currentTask = null;
         this.currentUserId = null;
         this.comments = [];
         this.commentContainer = null;
+        this.pendingAttachments = [];
     }
 
     /**
@@ -6913,40 +6369,14 @@ class TaskDetail {
     async loadComments() {
         if (!this.currentTask) return;
         try {
-            this.comments = await this.commentService.getTargetComments('task', this.currentTask.id);
+            const comments = await this.commentService.getTargetComments('task', this.currentTask.id);
+            this.comments = this.attachmentService
+                ? await this.attachmentService.hydrateComments(comments)
+                : comments;
         } catch (error) {
             console.error('[TaskDetail] 加载评论失败:', error);
             this.comments = [];
         }
-    }
-
-    /**
-     * 显示任务详情
-     * @param {Object|string} taskOrId - 任务对象或任务 ID
-     * @param {string} userId - 当前用户 ID
-     */
-    async show(taskOrId, userId) {
-        this.currentUserId = userId || this.currentUserId;
-
-        if (!taskOrId) {
-            throw new Error('缺少任务信息');
-        }
-
-        if (typeof taskOrId === 'string') {
-            this.currentTask = await this.taskService.getTask(taskOrId, this.currentUserId);
-        } else {
-            this.currentTask = taskOrId;
-        }
-
-        if (!this.currentTask) {
-            throw new Error('任务不存在或无权限访问');
-        }
-
-        this.currentProjectId = this.currentTask.projectId;
-        await this.loadProjectMembers();
-        await this.loadComments();
-        this.render();
-        this.bindEvents();
     }
 
     /**
@@ -6991,28 +6421,6 @@ class TaskDetail {
 
                 <div class="tc-detail-content">
                     <div class="tc-detail-title">${window.TCUtils.escapeHtml(task.title)}</div>
-
-                    <div class="tc-collab-banner ${task.helpRequested ? 'is-help' : ''}">
-                        <div>
-                            <div class="tc-collab-banner-title">${task.helpRequested ? '当前任务正在求助协作' : '当前任务可随时转为协作求助'}</div>
-                            <div class="tc-collab-banner-text">
-                                ${task.helpRequested
-                                    ? window.TCUtils.escapeHtml(task.helpMessage || '团队成员可在这里接手和跟进。')
-                                    : '适合把卡点、阻塞、联调问题写清楚，再通知团队一起处理。'}
-                            </div>
-                            <div class="tc-collab-banner-meta">
-                                <span>类型：${task.taskType === 'help' ? '求助任务' : '开发任务'}</span>
-                                <span>状态：${task.helpStatus || 'none'}</span>
-                                <span>协助人：${task.helperIds && task.helperIds.length > 0 ? task.helperIds.join(', ') : '暂无'}</span>
-                            </div>
-                        </div>
-                        <div class="tc-collab-banner-actions">
-                            ${task.helpRequested
-                                ? `<button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-claim-help-btn">我来处理</button>
-                                   <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-resolve-help-btn">标记解决</button>`
-                                : `<button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-request-help-btn">🆘 发起求助</button>`}
-                        </div>
-                    </div>
                     
                     <div class="tc-detail-meta">
                         <div class="tc-meta-item">
@@ -7055,23 +6463,6 @@ class TaskDetail {
                     </div>
 
                     <div class="tc-detail-section">
-                        <div class="tc-section-title">任务清单</div>
-                        <div class="tc-task-checklist" id="tc-task-checklist">
-                            ${(task.checklist && task.checklist.length > 0) ? task.checklist.map(item => `
-                                <label class="tc-task-checklist-item ${item.done ? 'done' : ''}" data-checklist-id="${item.id}">
-                                    <input type="checkbox" class="tc-task-checklist-toggle" data-checklist-id="${item.id}" ${item.done ? 'checked' : ''}>
-                                    <span class="tc-task-checklist-text">${window.TCUtils.escapeHtml(item.text)}</span>
-                                    <button type="button" class="tc-action-btn tc-task-checklist-delete" data-checklist-id="${item.id}">删除</button>
-                                </label>
-                            `).join('') : '<div class="tc-placeholder">暂无清单项</div>'}
-                        </div>
-                        <div class="tc-task-checklist-create">
-                            <input type="text" class="tc-form-input" id="tc-new-checklist-text" placeholder="添加新的清单项，例如：补充接口文档">
-                            <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-add-checklist-btn">添加</button>
-                        </div>
-                    </div>
-
-                    <div class="tc-detail-section">
                         <div class="tc-section-title">进度</div>
                         <div class="tc-progress-bar">
                             <div class="tc-progress-fill" style="width: ${task.progress}%"></div>
@@ -7103,14 +6494,13 @@ class TaskDetail {
                         <!-- 评论输入框 -->
                         <div class="tc-comment-input">
                             <textarea class="tc-comment-textarea" id="tc-comment-input" 
-                                      placeholder="输入评论，支持 **Markdown** 语法；可将图片拖到左侧、文件拖到右侧上传..." rows="3"></textarea>
-                            <div class="tc-comment-dropzones" data-input-id="tc-comment-input">
-                                <div class="tc-comment-dropzone tc-dropzone-image" data-drop-kind="image">🖼️ 拖到左侧上传图片</div>
-                                <div class="tc-comment-dropzone tc-dropzone-file" data-drop-kind="file">📎 拖到右侧上传文件</div>
-                            </div>
+                                      placeholder="输入评论，支持 **Markdown** 语法..." rows="3"></textarea>
+                            <div class="tc-comment-attachment-list" id="tc-comment-attachment-list">${this.renderPendingAttachments(this.pendingAttachments)}</div>
                             <div class="tc-comment-input-footer">
-                                <div class="tc-comment-hint">支持 **粗体**、*斜体*、\`代码\`，并支持左右拖拽上传图片/文件</div>
+                                <div class="tc-comment-hint">支持 **粗体**、*斜体*、\`代码\`，也支持上传图片和文件</div>
                                 <div class="tc-comment-footer-actions">
+                                    <input type="file" id="tc-comment-file-input" multiple style="display:none;">
+                                    <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-comment-attach-btn">📎 上传</button>
                                     <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-send-comment">发送</button>
                                 </div>
                             </div>
@@ -7138,7 +6528,7 @@ class TaskDetail {
                         <span class="tc-comment-author">${window.TCUtils.escapeHtml(comment.authorId)}</span>
                         <span class="tc-comment-time">${window.TCUtils.formatRelativeTime(comment.createdAt)}</span>
                     </div>
-                    <div class="tc-comment-content">${this.markdown.renderSafe(comment.body)}</div>
+                    <div class="tc-comment-content">${this.markdown.renderSafe(comment.body || "")}</div>${this.renderCommentAttachments(comment)}
                     <div class="tc-comment-actions">
                         <button class="tc-action-btn tc-reply-btn" data-author-id="${comment.authorId}">回复</button>
                         ${comment.authorId === this.currentUserId ? `
@@ -7148,6 +6538,44 @@ class TaskDetail {
                 </div>
             </div>
         `).join('');
+    }
+
+    renderPendingAttachments(items) {
+        const list = Array.isArray(items) ? items : [];
+        if (list.length === 0) return '<div class="tc-comment-attachment-empty">暂未添加附件</div>';
+        return list.map(item => `
+            <div class="tc-pending-attachment ${item.kind === 'image' ? 'is-image' : 'is-file'}">
+                <span class="tc-pending-attachment-name">${window.TCUtils.escapeHtml(item.name)}</span>
+                <span class="tc-pending-attachment-meta">${this.formatFileSize(item.size)}</span>
+            </div>
+        `).join('');
+    }
+
+    renderCommentAttachments(comment) {
+        const attachments = Array.isArray(comment?.attachments) ? comment.attachments : [];
+        if (attachments.length === 0) return '';
+        return `
+            <div class="tc-comment-attachments">
+                ${attachments.map(att => att.kind === 'image' ? `
+                    <div class="tc-comment-attachment is-image">
+                        <img src="${att.previewUrl || att.dataUrl || att.downloadUrl || att.url}" alt="${window.TCUtils.escapeHtml(att.name)}">
+                        <div class="tc-comment-attachment-meta">${window.TCUtils.escapeHtml(att.name)} · ${this.formatFileSize(att.size)}</div>
+                    </div>
+                ` : `
+                    <a class="tc-comment-attachment is-file" href="${att.downloadUrl || att.url || att.dataUrl}" download="${window.TCUtils.escapeHtml(att.name)}" target="_blank" rel="noopener noreferrer">
+                        <span>📎 ${window.TCUtils.escapeHtml(att.name)}</span>
+                        <span>${this.formatFileSize(att.size)}</span>
+                    </a>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    formatFileSize(size) {
+        const value = Number(size || 0);
+        if (value >= 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + ' MB';
+        if (value >= 1024) return Math.round(value / 1024) + ' KB';
+        return value + ' B';
     }
 
     /**
@@ -7192,56 +6620,26 @@ class TaskDetail {
             deleteBtn.addEventListener('click', () => this.confirmDelete());
         }
 
-        const requestHelpBtn = document.getElementById('tc-request-help-btn');
-        if (requestHelpBtn) {
-            requestHelpBtn.addEventListener('click', () => this.requestHelp());
-        }
-
-        const claimHelpBtn = document.getElementById('tc-claim-help-btn');
-        if (claimHelpBtn) {
-            claimHelpBtn.addEventListener('click', () => this.claimHelp());
-        }
-
-        const resolveHelpBtn = document.getElementById('tc-resolve-help-btn');
-        if (resolveHelpBtn) {
-            resolveHelpBtn.addEventListener('click', () => this.resolveHelp());
-        }
-
-        document.querySelectorAll('.tc-task-checklist-toggle').forEach(toggle => {
-            toggle.addEventListener('change', () => this.toggleChecklistItem(toggle.dataset.checklistId, toggle.checked));
-        });
-
-        document.querySelectorAll('.tc-task-checklist-delete').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                this.removeChecklistItem(btn.dataset.checklistId);
-            });
-        });
-
-        const addChecklistBtn = document.getElementById('tc-add-checklist-btn');
-        if (addChecklistBtn) {
-            addChecklistBtn.addEventListener('click', () => this.addChecklistItem());
-        }
-
-        const newChecklistInput = document.getElementById('tc-new-checklist-text');
-        if (newChecklistInput) {
-            newChecklistInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    this.addChecklistItem();
-                }
-            });
-        }
-
         // 发送评论按钮
         const sendBtn = document.getElementById('tc-send-comment');
         if (sendBtn) {
             sendBtn.addEventListener('click', () => this.sendComment());
         }
 
-        this.bindCommentDropzones('tc-comment-input');
+        const attachBtn = document.getElementById('tc-comment-attach-btn');
+        const fileInput = document.getElementById('tc-comment-file-input');
+        if (attachBtn && fileInput) {
+            attachBtn.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', async (e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length > 0) {
+                    await this.handleCommentAttachments(files);
+                    fileInput.value = '';
+                }
+            });
+        }
 
+        // Ctrl+Enter 发送评论
         const commentInput = document.getElementById('tc-comment-input');
         if (commentInput) {
             commentInput.addEventListener('keydown', (e) => {
@@ -7273,10 +6671,11 @@ class TaskDetail {
      */
     async sendComment() {
         const commentInput = document.getElementById('tc-comment-input');
-        const body = commentInput?.value?.trim();
+        const body = commentInput?.value?.trim() || '';
+        const attachmentIds = this.pendingAttachments.map(item => item.attachmentId);
         
-        if (!body) {
-            this.panel.api.ui.showToast('请输入评论内容', 'warning');
+        if (!body && attachmentIds.length === 0) {
+            this.panel.api.ui.showToast('请输入评论内容或上传附件', 'warning');
             return;
         }
 
@@ -7287,15 +6686,14 @@ class TaskDetail {
                 projectId: this.currentTask.projectId,
                 authorId: this.currentUserId,
                 body: body,
-                mentions: this.extractMentions(body)
+                mentions: this.extractMentions(body),
+                attachmentIds
             });
 
             this.panel.api.ui.showToast('评论已发送', 'success');
-            
-            // 清空输入框
             commentInput.value = '';
+            this.pendingAttachments = [];
 
-            // 重新加载评论
             await this.loadComments();
             this.render();
             this.bindEvents();
@@ -7340,6 +6738,7 @@ class TaskDetail {
         if (!confirm('确定要删除这条评论吗？')) return;
 
         try {
+            // 获取线程
             const thread = await this.commentService.getOrCreateThread('task', this.currentTask.id);
             
             await this.commentService.deleteComment(
@@ -7350,6 +6749,7 @@ class TaskDetail {
 
             this.panel.api.ui.showToast('评论已删除', 'success');
 
+            // 重新加载评论
             await this.loadComments();
             this.render();
             this.bindEvents();
@@ -7358,158 +6758,19 @@ class TaskDetail {
         }
     }
 
-    bindCommentDropzones(inputId) {
-        document.querySelectorAll(`.tc-comment-dropzones[data-input-id="${inputId}"] .tc-comment-dropzone`).forEach(zone => {
-            const kind = zone.dataset.dropKind;
-            const setActive = (active) => zone.classList.toggle('is-active', active);
-            ['dragenter', 'dragover'].forEach(eventName => {
-                zone.addEventListener(eventName, (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setActive(true);
-                });
-            });
-            ['dragleave', 'dragend', 'drop'].forEach(eventName => {
-                zone.addEventListener(eventName, () => setActive(false));
-            });
-            zone.addEventListener('drop', async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const files = Array.from(e.dataTransfer?.files || []);
-                await this.handleCommentDropFiles(inputId, files, kind);
-            });
-        });
-    }
-
-    async handleCommentDropFiles(inputId, files, kind) {
-        if (!files || files.length === 0) return;
-        const filteredFiles = files.filter(file => kind === 'image' ? String(file.type || '').startsWith('image/') : !String(file.type || '').startsWith('image/'));
-        if (filteredFiles.length === 0) {
-            this.panel.api.ui.showToast(kind === 'image' ? '请将图片拖到左侧区域' : '请将文件拖到右侧区域', 'warning');
+    async handleCommentAttachments(files) {
+        if (!this.attachmentService) {
+            this.panel.api.ui.showToast('当前版本未启用附件服务', 'warning');
             return;
         }
         try {
-            const text = await window.TCAttachmentUtils.filesToMarkdown(filteredFiles, this.panel.api.ui);
-            if (!text) return;
-            const input = document.getElementById(inputId);
-            if (!input) return;
-            input.value = [input.value.trim(), text].filter(Boolean).join('\n');
-            input.focus();
-            this.panel.api.ui.showToast(filteredFiles.length === 1 ? '附件已插入评论' : `已插入 ${filteredFiles.length} 个附件`, 'success');
+            const uploaded = await this.attachmentService.uploadFiles(files, this.currentTask.projectId, this.currentUserId);
+            this.pendingAttachments.push(...uploaded);
+            const container = document.getElementById('tc-comment-attachment-list');
+            if (container) container.innerHTML = this.renderPendingAttachments(this.pendingAttachments);
+            this.panel.api.ui.showToast('附件上传成功', 'success');
         } catch (error) {
-            this.panel.api.ui.showToast('插入附件失败: ' + error.message, 'error');
-        }
-    }
-
-    async requestHelp() {
-        const note = prompt('请补充求助说明，写清卡点和需要谁协助：', this.currentTask.helpMessage || this.currentTask.description || '');
-        if (note === null) return;
-
-        try {
-            this.currentTask = await this.taskService.updateTask(
-                this.currentTask.id,
-                {
-                    helpRequested: true,
-                    helpStatus: 'open',
-                    helpMessage: note || '需要团队协助推进。',
-                    taskType: this.currentTask.taskType || 'task'
-                },
-                this.currentUserId
-            );
-
-            await this.notifyHelpRequested(this.currentTask);
-            this.panel.api.ui.showToast('已发起团队求助', 'success');
-            this.render();
-            this.bindEvents();
-        } catch (error) {
-            this.panel.api.ui.showToast('发起求助失败: ' + error.message, 'error');
-        }
-    }
-
-    async claimHelp() {
-        try {
-            const helperIds = Array.from(new Set([...(this.currentTask.helperIds || []), this.currentUserId]));
-            this.currentTask = await this.taskService.updateTask(
-                this.currentTask.id,
-                {
-                    helpRequested: true,
-                    helpStatus: 'claimed',
-                    helperIds
-                },
-                this.currentUserId
-            );
-
-            await this.notifyHelpClaimed(this.currentTask);
-            this.panel.api.ui.showToast('已认领该求助', 'success');
-            this.render();
-            this.bindEvents();
-        } catch (error) {
-            this.panel.api.ui.showToast('认领失败: ' + error.message, 'error');
-        }
-    }
-
-    async resolveHelp() {
-        try {
-            this.currentTask = await this.taskService.updateTask(
-                this.currentTask.id,
-                {
-                    helpRequested: false,
-                    helpStatus: 'resolved'
-                },
-                this.currentUserId
-            );
-
-            await this.notifyHelpResolved(this.currentTask);
-            this.panel.api.ui.showToast('已将求助标记为解决', 'success');
-            this.render();
-            this.bindEvents();
-        } catch (error) {
-            this.panel.api.ui.showToast('更新失败: ' + error.message, 'error');
-        }
-    }
-
-    async notifyHelpRequested(task) {
-        try {
-            const project = await this.projectService.getProject(task.projectId);
-            const userIds = (project?.members || []).map(m => m.userId);
-            this.eventBus.emit(window.TCConstants.EVENTS.HELP_REQUESTED, {
-                projectId: task.projectId,
-                taskId: task.id,
-                taskTitle: task.title,
-                requestedBy: this.currentUserId,
-                userIds
-            });
-        } catch (error) {
-            console.warn('[TaskDetail] 求助通知发送失败:', error);
-        }
-    }
-
-    async notifyHelpClaimed(task) {
-        try {
-            const notifyUserIds = Array.from(new Set([task.createdBy, ...(task.assigneeIds || [])].filter(Boolean)));
-            this.eventBus.emit(window.TCConstants.EVENTS.HELP_CLAIMED, {
-                projectId: task.projectId,
-                taskId: task.id,
-                taskTitle: task.title,
-                helperId: this.currentUserId,
-                notifyUserIds
-            });
-        } catch (error) {
-            console.warn('[TaskDetail] 求助认领通知发送失败:', error);
-        }
-    }
-
-    async notifyHelpResolved(task) {
-        try {
-            const notifyUserIds = Array.from(new Set([task.createdBy, ...(task.assigneeIds || []), ...(task.helperIds || [])].filter(Boolean)));
-            this.eventBus.emit(window.TCConstants.EVENTS.HELP_RESOLVED, {
-                projectId: task.projectId,
-                taskId: task.id,
-                taskTitle: task.title,
-                notifyUserIds
-            });
-        } catch (error) {
-            console.warn('[TaskDetail] 求助解决通知发送失败:', error);
+            this.panel.api.ui.showToast('上传附件失败: ' + error.message, 'error');
         }
     }
 
@@ -7529,46 +6790,6 @@ class TaskDetail {
             this.bindEvents();
         } catch (error) {
             this.panel.api.ui.showToast('更新状态失败: ' + error.message, 'error');
-        }
-    }
-
-    async toggleChecklistItem(itemId, done) {
-        const checklist = (this.currentTask.checklist || []).map(item =>
-            item.id === itemId ? { ...item, done } : item
-        );
-        await this.saveChecklist(checklist, done ? '清单项已完成' : '清单项已取消完成');
-    }
-
-    async addChecklistItem() {
-        const input = document.getElementById('tc-new-checklist-text');
-        const text = input?.value?.trim();
-        if (!text) {
-            this.panel.api.ui.showToast('请输入清单项内容', 'warning');
-            return;
-        }
-
-        const checklist = [...(this.currentTask.checklist || []), {
-            id: `check_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            text,
-            done: false,
-            createdAt: Date.now()
-        }];
-        await this.saveChecklist(checklist, '清单项已添加');
-    }
-
-    async removeChecklistItem(itemId) {
-        const checklist = (this.currentTask.checklist || []).filter(item => item.id !== itemId);
-        await this.saveChecklist(checklist, '清单项已删除');
-    }
-
-    async saveChecklist(checklist, successMessage) {
-        try {
-            this.currentTask = await this.taskService.updateTask(this.currentTask.id, { checklist }, this.currentUserId);
-            this.panel.api.ui.showToast(successMessage, 'success');
-            this.render();
-            this.bindEvents();
-        } catch (error) {
-            this.panel.api.ui.showToast('更新清单失败: ' + error.message, 'error');
         }
     }
 
@@ -7702,6 +6923,23 @@ class TaskDetail {
         });
     }
 
+    async show(taskOrId, userId) {
+        this.currentUserId = userId;
+        this.pendingAttachments = [];
+        const task = typeof taskOrId === 'string'
+            ? await this.taskService.getTask(taskOrId, userId)
+            : taskOrId;
+        if (!task) {
+            throw new Error('任务不存在');
+        }
+        this.currentTask = task;
+        this.currentProjectId = task.projectId;
+        await this.loadProjectMembers();
+        await this.loadComments();
+        this.render();
+        this.bindEvents();
+    }
+
     /**
      * 销毁
      */
@@ -7718,12 +6956,14 @@ window.TCTaskDetail = TaskDetail;
  */
 
 class CommentInput {
-    constructor(panel, commentService, markdownRenderer, eventBus) {
+    constructor(panel, commentService, markdownRenderer, eventBus, attachmentService) {
         this.panel = panel;
         this.commentService = commentService;
         this.markdown = markdownRenderer;
         this.eventBus = eventBus;
+        this.attachmentService = attachmentService;
         this.currentUserId = null;
+        this.pendingAttachments = [];
         this.targetType = null;
         this.targetId = null;
         this.projectId = null;
@@ -7753,16 +6993,13 @@ class CommentInput {
                 <div class="tc-input-content">
                     <div class="tc-edit-pane ${!this.isPreviewMode ? 'active' : ''}">
                         <textarea class="tc-comment-textarea" 
-                                  placeholder="输入评论，支持 **Markdown** 语法；可将图片拖到左侧、文件拖到右侧上传..."
+                                  placeholder="输入评论，支持 **Markdown** 语法..."
                                   rows="3"></textarea>
-                        <div class="tc-comment-dropzones" data-input-id="tc-generic-comment-input">
-                            <div class="tc-comment-dropzone tc-dropzone-image" data-drop-kind="image">🖼️ 拖到左侧上传图片</div>
-                            <div class="tc-comment-dropzone tc-dropzone-file" data-drop-kind="file">📎 拖到右侧上传文件</div>
-                        </div>
                     </div>
                     <div class="tc-preview-pane ${this.isPreviewMode ? 'active' : ''}">
                         <div class="tc-preview-content">预览将在这里显示...</div>
                     </div>
+                    <div class="tc-comment-attachment-list">${this.renderPendingAttachments ? this.renderPendingAttachments(this.pendingAttachments) : ''}</div>
                 </div>
                 <div class="tc-input-footer">
                     <div class="tc-input-hint">
@@ -7770,6 +7007,9 @@ class CommentInput {
                         <span>支持 **粗体**、*斜体*、\`代码\`、\`\`\`代码块\`\`\`、[链接](url)</span>
                     </div>
                     <div class="tc-input-actions">
+                        <button class="tc-btn tc-btn-secondary tc-btn-sm tc-attach-btn" title="附件">
+                            📎
+                        </button>
                         <button class="tc-btn tc-btn-secondary tc-btn-sm tc-mention-btn" title="@提及">
                             @
                         </button>
@@ -7824,7 +7064,10 @@ class CommentInput {
             this.showMentionPicker();
         });
 
-        this.bindDropzones();
+        // 附件按钮
+        this.container.querySelector('.tc-attach-btn').addEventListener('click', () => {
+            this.showAttachmentPicker();
+        });
     }
 
     /**
@@ -7875,13 +7118,17 @@ class CommentInput {
                 projectId: this.projectId,
                 authorId: this.currentUserId,
                 body: body,
-                mentions: this.extractMentions(body)
+                mentions: this.extractMentions(body),
+                attachmentIds: this.pendingAttachments.map(item => item.attachmentId)
             });
 
             this.panel.api.ui.showToast('评论已发送', 'success');
 
             // 清空输入框
             this.textarea.value = '';
+            this.pendingAttachments = [];
+            const attachmentList = this.container.querySelector('.tc-comment-attachment-list');
+            if (attachmentList) attachmentList.innerHTML = this.renderPendingAttachments(this.pendingAttachments);
             if (this.isPreviewMode) {
                 this.togglePreview(false);
             }
@@ -7929,50 +7176,50 @@ class CommentInput {
     }
 
     /**
-     * 绑定拖拽上传区
+     * 显示附件选择器
      */
-    bindDropzones() {
-        this.container.querySelectorAll('.tc-comment-dropzone').forEach(zone => {
-            const kind = zone.dataset.dropKind;
-            const setActive = (active) => zone.classList.toggle('is-active', active);
-            ['dragenter', 'dragover'].forEach(eventName => {
-                zone.addEventListener(eventName, (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setActive(true);
-                });
-            });
-            ['dragleave', 'dragend', 'drop'].forEach(eventName => {
-                zone.addEventListener(eventName, () => setActive(false));
-            });
-            zone.addEventListener('drop', async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                await this.handleAttachments(Array.from(e.dataTransfer?.files || []), kind);
-            });
+    showAttachmentPicker() {
+        // 创建文件输入
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.multiple = true;
+        fileInput.accept = '*/*';
+
+        fileInput.addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length > 0) {
+                await this.handleAttachments(files);
+            }
         });
+
+        fileInput.click();
     }
 
     /**
      * 处理附件
      * @param {Array} files - 文件列表
-     * @param {string} kind - image 或 file
      */
-    async handleAttachments(files, kind = 'file') {
-        try {
-            const filteredFiles = (files || []).filter(file => kind === 'image' ? String(file.type || '').startsWith('image/') : !String(file.type || '').startsWith('image/'));
-            if (!filteredFiles.length) {
-                this.panel.api.ui.showToast(kind === 'image' ? '请将图片拖到左侧区域' : '请将文件拖到右侧区域', 'warning');
-                return;
-            }
-            const attachmentText = await window.TCAttachmentUtils.filesToMarkdown(filteredFiles, this.panel.api.ui);
-            if (!attachmentText) return;
-            this.textarea.value = [this.textarea.value.trim(), attachmentText].filter(Boolean).join('\n');
-            this.updatePreview();
-            this.panel.api.ui.showToast('附件已插入评论', 'success');
-        } catch (error) {
-            this.panel.api.ui.showToast('处理附件失败: ' + error.message, 'error');
+    renderPendingAttachments(items) {
+        const list = Array.isArray(items) ? items : [];
+        if (list.length === 0) return '<div class="tc-comment-attachment-empty">暂未添加附件</div>';
+        return list.map(item => `
+            <div class="tc-pending-attachment ${item.kind === 'image' ? 'is-image' : 'is-file'}">
+                <span class="tc-pending-attachment-name">${window.TCUtils.escapeHtml(item.name)}</span>
+                <span class="tc-pending-attachment-meta">${Math.max(1, Math.round((item.size || 0) / 1024))} KB</span>
+            </div>
+        `).join('');
+    }
+
+    async handleAttachments(files) {
+        if (!this.attachmentService) {
+            this.panel.api.ui.showToast('当前版本未启用真实附件上传', 'warning');
+            return;
         }
+        const uploaded = await this.attachmentService.uploadFiles(files, this.projectId, this.currentUserId);
+        this.pendingAttachments.push(...uploaded);
+        const attachmentList = this.container.querySelector('.tc-comment-attachment-list');
+        if (attachmentList) attachmentList.innerHTML = this.renderPendingAttachments(this.pendingAttachments);
+        this.panel.api.ui.showToast('附件上传成功', 'success');
     }
 
     /**
@@ -8116,6 +7363,44 @@ class CommentList {
                 </div>
             </div>
         `;
+    }
+
+    renderPendingPlanAttachments(items) {
+        const list = Array.isArray(items) ? items : [];
+        if (list.length === 0) return '<div class="tc-comment-attachment-empty">暂未添加附件</div>';
+        return list.map(item => `
+            <div class="tc-pending-attachment ${item.kind === 'image' ? 'is-image' : 'is-file'}">
+                <span class="tc-pending-attachment-name">${window.TCUtils.escapeHtml(item.name)}</span>
+                <span class="tc-pending-attachment-meta">${this.formatFileSize(item.size)}</span>
+            </div>
+        `).join('');
+    }
+
+    renderPlanCommentAttachments(comment) {
+        const attachments = Array.isArray(comment?.attachments) ? comment.attachments : [];
+        if (attachments.length === 0) return '';
+        return `
+            <div class="tc-comment-attachments">
+                ${attachments.map(att => att.kind === 'image' ? `
+                    <div class="tc-comment-attachment is-image">
+                        <img src="${att.previewUrl || att.dataUrl || att.downloadUrl || att.url}" alt="${window.TCUtils.escapeHtml(att.name)}">
+                        <div class="tc-comment-attachment-meta">${window.TCUtils.escapeHtml(att.name)} · ${this.formatFileSize(att.size)}</div>
+                    </div>
+                ` : `
+                    <a class="tc-comment-attachment is-file" href="${att.downloadUrl || att.url || att.dataUrl}" download="${window.TCUtils.escapeHtml(att.name)}" target="_blank" rel="noopener noreferrer">
+                        <span>📎 ${window.TCUtils.escapeHtml(att.name)}</span>
+                        <span>${this.formatFileSize(att.size)}</span>
+                    </a>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    formatFileSize(size) {
+        const value = Number(size || 0);
+        if (value >= 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + ' MB';
+        if (value >= 1024) return Math.round(value / 1024) + ' KB';
+        return value + ' B';
     }
 
     /**
@@ -8369,7 +7654,7 @@ window.TCCommentList = CommentList;
  */
 
 class PlanView {
-    constructor(panel, planService, notificationService, eventBus, projectService, commentService, markdownRenderer) {
+    constructor(panel, planService, notificationService, eventBus, projectService, commentService, markdownRenderer, attachmentService) {
         this.panel = panel;
         this.planService = planService;
         this.notificationService = notificationService;
@@ -8377,11 +7662,13 @@ class PlanView {
         this.projectService = projectService;
         this.commentService = commentService;
         this.markdown = markdownRenderer;
+        this.attachmentService = attachmentService;
         this.currentProjectId = null;
         this.currentUserId = null;
         this.plans = [];
         this.projectMembers = [];
         this.comments = [];
+        this.pendingPlanAttachments = [];
     }
 
     /**
@@ -8513,7 +7800,7 @@ class PlanView {
                 </div>
                 <div class="tc-plan-card-footer">
                     <div class="tc-plan-members">
-                        👥 ${plan.assigneeIds.length} 成员 · ☑ ${(plan.checklist || []).length} 清单项
+                        👥 ${plan.assigneeIds.length} 成员
                     </div>
                     <button class="tc-btn tc-btn-secondary tc-btn-sm tc-view-plan-btn" data-plan-id="${plan.id}">
                         查看详情
@@ -8602,19 +7889,6 @@ class PlanView {
                         <input type="text" class="tc-form-input" id="tc-plan-deliverables" 
                                placeholder="例如：学习笔记, 示例代码, 分享纪要">
                     </div>
-                    <div class="tc-form-group">
-                        <label class="tc-form-label">学习清单（复选项）</label>
-                        <div class="tc-checklist-builder">
-                            <div class="tc-checklist-builder-list" id="tc-plan-checklist-builder-list">
-                                <div class="tc-checklist-builder-row">
-                                    <input type="text" class="tc-form-input tc-plan-checklist-input" placeholder="例如：阅读异步编程章节">
-                                    <button type="button" class="tc-btn tc-btn-secondary tc-btn-sm tc-plan-checklist-remove">删除</button>
-                                </div>
-                            </div>
-                            <button type="button" class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-add-plan-checklist-item">+ 添加清单项</button>
-                        </div>
-                        <div class="tc-form-help">创建后会在计划详情里显示成可勾选的学习清单。</div>
-                    </div>
                 </div>
                 <div class="tc-modal-footer">
                     <button class="tc-btn tc-btn-secondary tc-modal-cancel">取消</button>
@@ -8625,30 +7899,6 @@ class PlanView {
 
         document.body.appendChild(modal);
 
-        const checklistList = modal.querySelector('#tc-plan-checklist-builder-list');
-        const bindChecklistRow = (row) => {
-            row.querySelector('.tc-plan-checklist-remove').addEventListener('click', () => {
-                if (checklistList.children.length === 1) {
-                    const input = row.querySelector('.tc-plan-checklist-input');
-                    if (input) input.value = '';
-                    return;
-                }
-                row.remove();
-            });
-        };
-        checklistList.querySelectorAll('.tc-checklist-builder-row').forEach(bindChecklistRow);
-        modal.querySelector('#tc-add-plan-checklist-item').addEventListener('click', () => {
-            const row = document.createElement('div');
-            row.className = 'tc-checklist-builder-row';
-            row.innerHTML = `
-                <input type="text" class="tc-form-input tc-plan-checklist-input" placeholder="例如：输出一份学习笔记">
-                <button type="button" class="tc-btn tc-btn-secondary tc-btn-sm tc-plan-checklist-remove">删除</button>
-            `;
-            checklistList.appendChild(row);
-            bindChecklistRow(row);
-            row.querySelector('.tc-plan-checklist-input')?.focus();
-        });
-
         modal.querySelector('.tc-modal-close').addEventListener('click', () => modal.remove());
         modal.querySelector('.tc-modal-cancel').addEventListener('click', () => modal.remove());
 
@@ -8658,10 +7908,8 @@ class PlanView {
             const objectives = document.getElementById('tc-plan-objectives').value.trim();
             const dueDate = document.getElementById('tc-plan-due-date').value;
             const deliverablesStr = document.getElementById('tc-plan-deliverables').value.trim();
-            const checklist = Array.from(modal.querySelectorAll('.tc-plan-checklist-input'))
-                .map(input => input.value.trim())
-                .filter(Boolean);
 
+            // 获取选中的成员
             const assigneeCheckboxes = document.querySelectorAll('.tc-plan-assignee-checkbox:checked');
             const assigneeIds = Array.from(assigneeCheckboxes).map(cb => cb.value);
 
@@ -8687,7 +7935,6 @@ class PlanView {
                     objectives,
                     dueDate: dueDate ? new Date(dueDate).getTime() : null,
                     deliverables,
-                    checklist,
                     assigneeIds: assigneeIds
                 }, this.currentUserId);
 
@@ -8710,6 +7957,7 @@ class PlanView {
     async showPlanDetail(planId) {
         try {
             const plan = await this.planService.getPlan(planId);
+            this.pendingPlanAttachments = [];
             if (!plan) {
                 this.panel.api.ui.showToast('计划不存在', 'error');
                 return;
@@ -8721,7 +7969,10 @@ class PlanView {
             const allProgress = await this.planService.getAllMemberProgress(planId);
             
             // 加载评论
-            this.comments = await this.commentService.getTargetComments('plan', planId);
+            const comments = await this.commentService.getTargetComments('plan', planId);
+            this.comments = this.attachmentService
+                ? await this.attachmentService.hydrateComments(comments)
+                : comments;
             
             this.renderPlanDetail(plan, progress, allProgress);
         } catch (error) {
@@ -8793,23 +8044,6 @@ class PlanView {
                         </div>
                     ` : ''}
 
-                    <div class="tc-detail-section">
-                        <div class="tc-section-title">学习清单</div>
-                        <div class="tc-task-checklist" id="tc-plan-checklist">
-                            ${(plan.checklist && plan.checklist.length > 0) ? plan.checklist.map(item => `
-                                <label class="tc-task-checklist-item ${(progress.checkedItemIds || []).includes(item.id) ? 'done' : ''}" data-plan-checklist-id="${item.id}">
-                                    <input type="checkbox" class="tc-plan-checklist-toggle" data-plan-checklist-id="${item.id}" ${(progress.checkedItemIds || []).includes(item.id) ? 'checked' : ''}>
-                                    <span class="tc-task-checklist-text">${window.TCUtils.escapeHtml(item.text)}</span>
-                                    <button type="button" class="tc-action-btn tc-plan-checklist-delete" data-plan-checklist-id="${item.id}">删除</button>
-                                </label>
-                            `).join('') : '<div class="tc-placeholder">暂无学习清单，请先添加一项要完成的学习内容</div>'}
-                        </div>
-                        <div class="tc-task-checklist-create">
-                            <input type="text" class="tc-form-input" id="tc-new-plan-checklist-text" placeholder="添加新的学习清单项，例如：完成第 1 章阅读并写总结">
-                            <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-add-plan-checklist-btn">添加</button>
-                        </div>
-                    </div>
-
                     <!-- 所有成员进度 -->
                     <div class="tc-detail-section">
                         <div class="tc-section-title">团队进度</div>
@@ -8856,14 +8090,13 @@ class PlanView {
 
                         <div class="tc-comment-input">
                             <textarea class="tc-comment-textarea" id="tc-plan-comment-input" 
-                                      placeholder="输入评论，支持 **Markdown** 语法；可将图片拖到左侧、文件拖到右侧上传..." rows="3"></textarea>
-                            <div class="tc-comment-dropzones" data-input-id="tc-plan-comment-input">
-                                <div class="tc-comment-dropzone tc-dropzone-image" data-drop-kind="image">🖼️ 拖到左侧上传图片</div>
-                                <div class="tc-comment-dropzone tc-dropzone-file" data-drop-kind="file">📎 拖到右侧上传文件</div>
-                            </div>
+                                      placeholder="输入评论，支持 **Markdown** 语法..." rows="3"></textarea>
+                            <div class="tc-comment-attachment-list" id="tc-plan-comment-attachment-list">${this.renderPendingPlanAttachments(this.pendingPlanAttachments)}</div>
                             <div class="tc-comment-input-footer">
-                                <div class="tc-comment-hint">支持 **粗体**、*斜体*、\`代码\`，并支持左右拖拽上传图片/文件</div>
+                                <div class="tc-comment-hint">支持 **粗体**、*斜体*、\`代码\`，也支持上传图片和文件</div>
                                 <div class="tc-comment-footer-actions">
+                                    <input type="file" id="tc-plan-comment-file-input" multiple style="display:none;">
+                                    <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-plan-comment-attach-btn">📎 上传</button>
                                     <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-send-plan-comment">发送</button>
                                 </div>
                             </div>
@@ -8889,26 +8122,25 @@ class PlanView {
             this.showSubmitWorkModal(plan.id);
         });
 
+        // 发送评论
         document.getElementById('tc-send-plan-comment').addEventListener('click', () => {
             this.sendComment(plan);
         });
 
-        this.bindCommentDropzones('tc-plan-comment-input');
-
-        document.querySelectorAll('.tc-plan-checklist-toggle').forEach(toggle => {
-            toggle.addEventListener('change', () => this.togglePlanChecklistItem(plan.id, toggle.dataset.planChecklistId, toggle.checked));
-        });
-        document.querySelectorAll('.tc-plan-checklist-delete').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.removePlanChecklistItem(plan.id, btn.dataset.planChecklistId);
+        const attachBtn = document.getElementById('tc-plan-comment-attach-btn');
+        const fileInput = document.getElementById('tc-plan-comment-file-input');
+        if (attachBtn && fileInput) {
+            attachBtn.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', async (e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length > 0) {
+                    await this.handlePlanCommentAttachments(plan, files);
+                    fileInput.value = '';
+                }
             });
-        });
-        const addChecklistBtn = document.getElementById('tc-add-plan-checklist-btn');
-        if (addChecklistBtn) {
-            addChecklistBtn.addEventListener('click', () => this.addPlanChecklistItem(plan.id));
         }
 
+        // Ctrl+Enter 发送评论
         const commentInput = document.getElementById('tc-plan-comment-input');
         if (commentInput) {
             commentInput.addEventListener('keydown', (e) => {
@@ -8933,92 +8165,6 @@ class PlanView {
                 this.deleteComment(commentId, plan);
             });
         });
-    }
-
-    bindCommentDropzones(inputId) {
-        document.querySelectorAll(`.tc-comment-dropzones[data-input-id="${inputId}"] .tc-comment-dropzone`).forEach(zone => {
-            const kind = zone.dataset.dropKind;
-            const setActive = (active) => zone.classList.toggle('is-active', active);
-            ['dragenter', 'dragover'].forEach(eventName => {
-                zone.addEventListener(eventName, (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setActive(true);
-                });
-            });
-            ['dragleave', 'dragend', 'drop'].forEach(eventName => {
-                zone.addEventListener(eventName, () => setActive(false));
-            });
-            zone.addEventListener('drop', async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const files = Array.from(e.dataTransfer?.files || []);
-                await this.handleCommentDropFiles(inputId, files, kind);
-            });
-        });
-    }
-
-    async handleCommentDropFiles(inputId, files, kind) {
-        if (!files || files.length === 0) return;
-        const filteredFiles = files.filter(file => kind === 'image' ? String(file.type || '').startsWith('image/') : !String(file.type || '').startsWith('image/'));
-        if (filteredFiles.length === 0) {
-            this.panel.api.ui.showToast(kind === 'image' ? '请将图片拖到左侧区域' : '请将文件拖到右侧区域', 'warning');
-            return;
-        }
-        try {
-            const text = await window.TCAttachmentUtils.filesToMarkdown(filteredFiles, this.panel.api.ui);
-            if (!text) return;
-            const input = document.getElementById(inputId);
-            if (!input) return;
-            input.value = [input.value.trim(), text].filter(Boolean).join('\n');
-            input.focus();
-            this.panel.api.ui.showToast(filteredFiles.length === 1 ? '附件已插入评论' : `已插入 ${filteredFiles.length} 个附件`, 'success');
-        } catch (error) {
-            this.panel.api.ui.showToast('插入附件失败: ' + error.message, 'error');
-        }
-    }
-
-    async togglePlanChecklistItem(planId, itemId, done) {
-        try {
-            await this.planService.updateChecklistState(planId, itemId, this.currentUserId, done);
-            await this.showPlanDetail(planId);
-        } catch (error) {
-            this.panel.api.ui.showToast('更新学习清单失败: ' + error.message, 'error');
-        }
-    }
-
-    async addPlanChecklistItem(planId) {
-        const input = document.getElementById('tc-new-plan-checklist-text');
-        const text = input?.value?.trim();
-        if (!text) {
-            this.panel.api.ui.showToast('请输入学习清单项内容', 'warning');
-            return;
-        }
-        try {
-            const plan = await this.planService.getPlan(planId);
-            const checklist = [...(plan.checklist || []), {
-                id: `plancheck_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                text,
-                createdAt: Date.now()
-            }];
-            await this.planService.updatePlan(planId, { checklist }, this.currentUserId);
-            await this.showPlanDetail(planId);
-            this.panel.api.ui.showToast('学习清单项已添加', 'success');
-        } catch (error) {
-            this.panel.api.ui.showToast('添加学习清单失败: ' + error.message, 'error');
-        }
-    }
-
-    async removePlanChecklistItem(planId, itemId) {
-        try {
-            const plan = await this.planService.getPlan(planId);
-            const checklist = (plan.checklist || []).filter(item => item.id !== itemId);
-            await this.planService.updatePlan(planId, { checklist }, this.currentUserId);
-            await this.showPlanDetail(planId);
-            this.panel.api.ui.showToast('学习清单项已删除', 'success');
-        } catch (error) {
-            this.panel.api.ui.showToast('删除学习清单失败: ' + error.message, 'error');
-        }
     }
 
     /**
@@ -9056,7 +8202,7 @@ class PlanView {
                         <span class="tc-comment-author">${window.TCUtils.escapeHtml(comment.authorId)}</span>
                         <span class="tc-comment-time">${window.TCUtils.formatRelativeTime(comment.createdAt)}</span>
                     </div>
-                    <div class="tc-comment-content">${this.markdown.renderSafe(comment.body)}</div>
+                    <div class="tc-comment-content">${this.markdown.renderSafe(comment.body || "")}</div>${this.renderPlanCommentAttachments(comment)}
                     <div class="tc-comment-actions">
                         <button class="tc-action-btn tc-reply-btn" data-author-id="${comment.authorId}">回复</button>
                         ${comment.authorId === this.currentUserId ? `
@@ -9066,6 +8212,44 @@ class PlanView {
                 </div>
             </div>
         `).join('');
+    }
+
+    renderPendingPlanAttachments(items) {
+        const list = Array.isArray(items) ? items : [];
+        if (list.length === 0) return '<div class="tc-comment-attachment-empty">暂未添加附件</div>';
+        return list.map(item => `
+            <div class="tc-pending-attachment ${item.kind === 'image' ? 'is-image' : 'is-file'}">
+                <span class="tc-pending-attachment-name">${window.TCUtils.escapeHtml(item.name)}</span>
+                <span class="tc-pending-attachment-meta">${this.formatFileSize(item.size)}</span>
+            </div>
+        `).join('');
+    }
+
+    renderPlanCommentAttachments(comment) {
+        const attachments = Array.isArray(comment?.attachments) ? comment.attachments : [];
+        if (attachments.length === 0) return '';
+        return `
+            <div class="tc-comment-attachments">
+                ${attachments.map(att => att.kind === 'image' ? `
+                    <div class="tc-comment-attachment is-image">
+                        <img src="${att.previewUrl || att.dataUrl || att.downloadUrl || att.url}" alt="${window.TCUtils.escapeHtml(att.name)}">
+                        <div class="tc-comment-attachment-meta">${window.TCUtils.escapeHtml(att.name)} · ${this.formatFileSize(att.size)}</div>
+                    </div>
+                ` : `
+                    <a class="tc-comment-attachment is-file" href="${att.downloadUrl || att.url || att.dataUrl}" download="${window.TCUtils.escapeHtml(att.name)}" target="_blank" rel="noopener noreferrer">
+                        <span>📎 ${window.TCUtils.escapeHtml(att.name)}</span>
+                        <span>${this.formatFileSize(att.size)}</span>
+                    </a>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    formatFileSize(size) {
+        const value = Number(size || 0);
+        if (value >= 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + ' MB';
+        if (value >= 1024) return Math.round(value / 1024) + ' KB';
+        return value + ' B';
     }
 
     /**
@@ -9084,10 +8268,11 @@ class PlanView {
      */
     async sendComment(plan) {
         const commentInput = document.getElementById('tc-plan-comment-input');
-        const body = commentInput?.value?.trim();
+        const body = commentInput?.value?.trim() || '';
+        const attachmentIds = this.pendingPlanAttachments.map(item => item.attachmentId);
         
-        if (!body) {
-            this.panel.api.ui.showToast('请输入评论内容', 'warning');
+        if (!body && attachmentIds.length === 0) {
+            this.panel.api.ui.showToast('请输入评论内容或上传附件', 'warning');
             return;
         }
 
@@ -9098,14 +8283,18 @@ class PlanView {
                 projectId: plan.projectId,
                 authorId: this.currentUserId,
                 body: body,
-                mentions: this.extractMentions(body)
+                mentions: this.extractMentions(body),
+                attachmentIds
             });
 
             this.panel.api.ui.showToast('评论已发送', 'success');
             commentInput.value = '';
+            this.pendingPlanAttachments = [];
 
-            // 重新加载评论并刷新
-            this.comments = await this.commentService.getTargetComments('plan', plan.id);
+            const comments = await this.commentService.getTargetComments('plan', plan.id);
+            this.comments = this.attachmentService
+                ? await this.attachmentService.hydrateComments(comments)
+                : comments;
             const progress = await this.planService.getMemberProgress(plan.id, this.currentUserId);
             const allProgress = await this.planService.getAllMemberProgress(plan.id);
             this.renderPlanDetail(plan, progress, allProgress);
@@ -9128,6 +8317,22 @@ class PlanView {
             mentions.push(match[1]);
         }
         return mentions;
+    }
+
+    async handlePlanCommentAttachments(plan, files) {
+        if (!this.attachmentService) {
+            this.panel.api.ui.showToast('当前版本未启用附件服务', 'warning');
+            return;
+        }
+        try {
+            const uploaded = await this.attachmentService.uploadFiles(files, plan.projectId, this.currentUserId);
+            this.pendingPlanAttachments.push(...uploaded);
+            const container = document.getElementById('tc-plan-comment-attachment-list');
+            if (container) container.innerHTML = this.renderPendingPlanAttachments(this.pendingPlanAttachments);
+            this.panel.api.ui.showToast('附件上传成功', 'success');
+        } catch (error) {
+            this.panel.api.ui.showToast('上传附件失败: ' + error.message, 'error');
+        }
     }
 
     /**
@@ -9162,7 +8367,10 @@ class PlanView {
             this.panel.api.ui.showToast('评论已删除', 'success');
 
             // 重新加载评论并刷新
-            this.comments = await this.commentService.getTargetComments('plan', plan.id);
+            const comments = await this.commentService.getTargetComments('plan', plan.id);
+            this.comments = this.attachmentService
+                ? await this.attachmentService.hydrateComments(comments)
+                : comments;
             const progress = await this.planService.getMemberProgress(plan.id, this.currentUserId);
             const allProgress = await this.planService.getAllMemberProgress(plan.id);
             this.renderPlanDetail(plan, progress, allProgress);
@@ -9608,7 +8816,6 @@ class ProjectSettingsView {
         this.currentProjectId = null;
         this.currentUserId = null;
         this.project = null;
-        this.userContacts = [];
     }
 
     /**
@@ -9619,64 +8826,9 @@ class ProjectSettingsView {
     async init(projectId, userId) {
         this.currentProjectId = projectId;
         this.currentUserId = userId;
-        await this.loadContacts();
         await this.loadProject();
         this.render();
         this.bindEvents();
-    }
-
-    /**
-     * 加载常用成员/好友列表
-     */
-    async loadContacts() {
-        if (!this.currentUserId) {
-            this.userContacts = [];
-            return;
-        }
-
-        try {
-            this.userContacts = await this.api.storage.get(`plugin:${this.currentUserId}:team-collab:contacts`) || [];
-            if (!Array.isArray(this.userContacts)) this.userContacts = [];
-        } catch (error) {
-            console.warn('[ProjectSettingsView] 加载常用成员失败:', error);
-            this.userContacts = [];
-        }
-    }
-
-    /**
-     * 保存常用成员/好友列表
-     */
-    async saveContacts() {
-        await this.api.storage.set(`plugin:${this.currentUserId}:team-collab:contacts`, this.userContacts.slice(0, 30));
-    }
-
-    /**
-     * 规范化用户名
-     * @param {string} input - 输入用户名
-     * @returns {string}
-     */
-    normalizeUserId(input) {
-        return String(input || '').trim().replace(/^@+/, '').replace(/\s+/g, '');
-    }
-
-    /**
-     * 记录常用成员
-     * @param {string} userId - 用户名
-     */
-    async rememberContact(userId) {
-        const normalized = this.normalizeUserId(userId);
-        if (!normalized || normalized === this.currentUserId) return;
-        this.userContacts = [normalized, ...this.userContacts.filter(item => item !== normalized)].slice(0, 30);
-        await this.saveContacts();
-    }
-
-    /**
-     * 删除常用成员
-     * @param {string} userId - 用户名
-     */
-    async forgetContact(userId) {
-        this.userContacts = this.userContacts.filter(item => item !== userId);
-        await this.saveContacts();
     }
 
     /**
@@ -9726,52 +8878,45 @@ class ProjectSettingsView {
                             <span class="tc-info-label">你的角色</span>
                             <span class="tc-info-value tc-role-badge tc-role-${memberInfo?.role || 'guest'}">${this.getRoleLabel(memberInfo?.role)}</span>
                         </div>
-                        <div class="tc-info-row">
-                            <span class="tc-info-label">你的用户名</span>
-                            <span class="tc-info-value">${window.TCUtils.escapeHtml(this.currentUserId || '')}</span>
+                    </div>
+
+                    <!-- 邀请码 -->
+                    <div class="tc-settings-section">
+                        <div class="tc-section-title">邀请码</div>
+                        <div class="tc-invite-code-section">
+                            <div class="tc-invite-code-box">
+                                <span class="tc-invite-code-text">${project.inviteCode || '未生成'}</span>
+                            </div>
+                            <div class="tc-invite-code-actions">
+                                <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-copy-invite">复制邀请码</button>
+                                ${canEdit ? '<button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-regenerate-invite">重新生成</button>' : ''}
+                            </div>
                         </div>
                     </div>
 
-                    <!-- 按用户名添加成员 -->
+                    ${canEdit ? `
                     <div class="tc-settings-section">
                         <div class="tc-section-title">按用户名添加成员</div>
                         <div class="tc-member-add-box">
                             <div class="tc-form-group">
-                                <label class="tc-form-label">成员用户名</label>
-                                <input type="text" class="tc-form-input" id="tc-add-member-username" placeholder="输入用户名，例如 alice 或 @alice">
+                                <label class="tc-form-label">用户名</label>
+                                <input type="text" class="tc-form-input" id="tc-member-username" placeholder="输入队友用户名，例如 alice 或 @alice">
                             </div>
                             <div class="tc-member-add-actions">
-                                <select class="tc-form-select" id="tc-add-member-role" ${canEdit ? '' : 'disabled'}>
-                                    <option value="member">成员</option>
-                                    <option value="admin">管理员</option>
-                                    <option value="guest">访客</option>
-                                </select>
-                                ${canEdit ? '<button class="tc-btn tc-btn-primary" id="tc-add-member-btn">添加到项目</button>' : ''}
+                                <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-add-member-btn">添加到项目</button>
                             </div>
-                            <div class="tc-form-hint">无需邀请码。让队友把用户名发给你，你输入后即可直接加入项目。</div>
-                            ${this.renderUserContacts(project.members || [], canEdit)}
+                            <div class="tc-form-hint">添加后，对方重新打开插件即可看到项目并协作。</div>
                         </div>
                     </div>
+                    ` : ''}
 
                     <!-- 成员列表 -->
                     <div class="tc-settings-section">
                         <div class="tc-section-title">成员列表 (${project.members?.length || 0})</div>
                         <div class="tc-members-list">
-                            ${this.renderMembersList(project.members || [], canEdit)}
+                            ${this.renderMembersList(project.members || [])}
                         </div>
                     </div>
-
-                    ${this.permission.canDeleteProject(this.currentUserId, project) ? `
-                        <div class="tc-settings-section">
-                            <div class="tc-section-title">危险操作</div>
-                            <div class="tc-member-add-box">
-                                <div class="tc-form-hint">删除项目后，所有成员的项目入口会被移除，项目不会再显示在协作列表中。</div>
-                                <div class="tc-member-add-actions">
-                                    <button class="tc-btn tc-btn-danger" id="tc-delete-project-btn">删除项目</button>
-                                </div>
-                            </div>
-                        </div>
-                    ` : ''}
 
                     <!-- 项目统计 -->
                     <div class="tc-settings-section">
@@ -9803,64 +8948,21 @@ class ProjectSettingsView {
     }
 
     /**
-     * 渲染常用成员/好友列表
-     * @param {Array} members - 项目成员
-     * @param {boolean} canEdit - 是否可编辑
-     * @returns {string}
-     */
-    renderUserContacts(members, canEdit) {
-        const memberIds = new Set((members || []).map(member => member.userId));
-        if (!this.userContacts.length) {
-            return `
-                <div class="tc-contacts-box">
-                    <div class="tc-contacts-title">常用成员</div>
-                    <div class="tc-placeholder">暂无常用成员。添加一次后，这里会保留快捷入口。</div>
-                </div>
-            `;
-        }
-
-        return `
-            <div class="tc-contacts-box">
-                <div class="tc-contacts-title">常用成员</div>
-                <div class="tc-contact-list">
-                    ${this.userContacts.map(userId => {
-                        const alreadyMember = memberIds.has(userId);
-                        return `
-                            <div class="tc-contact-chip ${alreadyMember ? 'is-added' : ''}">
-                                <span class="tc-contact-name">${window.TCUtils.escapeHtml(userId)}</span>
-                                <div class="tc-contact-actions">
-                                    ${canEdit && !alreadyMember ? `<button class="tc-chip-btn" data-action="quick-add-contact" data-userid="${window.TCUtils.escapeHtml(userId)}">加入项目</button>` : `<span class="tc-contact-status">${alreadyMember ? '已在项目中' : '可添加'}</span>`}
-                                    <button class="tc-chip-btn is-light" data-action="remove-contact" data-userid="${window.TCUtils.escapeHtml(userId)}">移除</button>
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-            </div>
-        `;
-    }
-
-    /**
      * 渲染成员列表
      * @param {Array} members - 成员列表
-     * @param {boolean} canEdit - 是否可编辑
      * @returns {string} HTML
      */
-    renderMembersList(members, canEdit) {
-        return members.map(member => {
-            const canRemove = canEdit && member.role !== 'owner' && member.userId !== this.currentUserId;
-            return `
-                <div class="tc-member-item">
-                    <div class="tc-member-avatar">${this.getInitials(member.userId)}</div>
-                    <div class="tc-member-info">
-                        <div class="tc-member-name">${window.TCUtils.escapeHtml(member.userId)}</div>
-                        <div class="tc-member-role tc-role-${member.role}">${this.getRoleLabel(member.role)}</div>
-                    </div>
-                    <div class="tc-member-joined">${window.TCUtils.formatDate(member.joinedAt)}</div>
-                    ${canRemove ? `<button class="tc-btn tc-btn-secondary tc-btn-sm" data-action="remove-member" data-userid="${window.TCUtils.escapeHtml(member.userId)}">移除</button>` : ''}
+    renderMembersList(members) {
+        return members.map(member => `
+            <div class="tc-member-item">
+                <div class="tc-member-avatar">${this.getInitials(member.userId)}</div>
+                <div class="tc-member-info">
+                    <div class="tc-member-name">${window.TCUtils.escapeHtml(member.userId)}</div>
+                    <div class="tc-member-role tc-role-${member.role}">${this.getRoleLabel(member.role)}</div>
                 </div>
-            `;
-        }).join('');
+                <div class="tc-member-joined">${window.TCUtils.formatDate(member.joinedAt)}</div>
+            </div>
+        `).join('');
     }
 
     /**
@@ -9892,87 +8994,106 @@ class ProjectSettingsView {
      * 绑定事件
      */
     bindEvents() {
-        const addBtn = document.getElementById('tc-add-member-btn');
-        if (addBtn) {
-            addBtn.addEventListener('click', async () => {
-                const inputEl = document.getElementById('tc-add-member-username');
-                const roleEl = document.getElementById('tc-add-member-role');
-                const username = this.normalizeUserId(inputEl?.value || '');
-                const role = roleEl?.value || 'member';
+        // 复制邀请码
+        const copyBtn = document.getElementById('tc-copy-invite');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', () => this.copyInviteCode());
+        }
 
-                if (!username) {
+        // 重新生成邀请码
+        const regenBtn = document.getElementById('tc-regenerate-invite');
+        if (regenBtn) {
+            regenBtn.addEventListener('click', () => this.confirmRegenerateInvite());
+        }
+
+        const addMemberBtn = document.getElementById('tc-add-member-btn');
+        if (addMemberBtn) {
+            addMemberBtn.addEventListener('click', async () => {
+                const input = document.getElementById('tc-member-username');
+                const raw = String(input?.value || '').trim();
+                const userId = raw.replace(/^@+/, '');
+                if (!userId) {
                     this.api.ui.showToast('请输入用户名', 'warning');
                     return;
                 }
-
                 try {
-                    await this.projectService.inviteMember(this.currentProjectId, username, this.currentUserId, role);
-                    await this.rememberContact(username);
+                    await this.projectService.inviteMember(this.currentProjectId, userId, this.currentUserId);
+                    this.api.ui.showToast('成员已添加，对方重新打开插件后即可看到项目', 'success');
+                    if (input) input.value = '';
                     await this.refresh();
-                    if (inputEl) inputEl.value = '';
-                    this.api.ui.showToast(`已将 ${username} 添加到项目`, 'success');
                 } catch (error) {
                     this.api.ui.showToast('添加成员失败: ' + error.message, 'error');
-                }
-            });
-        }
-
-        document.querySelectorAll('[data-action="quick-add-contact"]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const username = btn.dataset.userid;
-                try {
-                    await this.projectService.inviteMember(this.currentProjectId, username, this.currentUserId, 'member');
-                    await this.rememberContact(username);
-                    await this.refresh();
-                    this.api.ui.showToast(`已将 ${username} 添加到项目`, 'success');
-                } catch (error) {
-                    this.api.ui.showToast('添加成员失败: ' + error.message, 'error');
-                }
-            });
-        });
-
-        document.querySelectorAll('[data-action="remove-contact"]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const username = btn.dataset.userid;
-                await this.forgetContact(username);
-                await this.refresh();
-                this.api.ui.showToast(`已移除常用成员 ${username}`, 'success');
-            });
-        });
-
-        document.querySelectorAll('[data-action="remove-member"]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const username = btn.dataset.userid;
-                try {
-                    await this.projectService.removeMember(this.currentProjectId, username, this.currentUserId);
-                    await this.refresh();
-                    this.api.ui.showToast(`已从项目移除 ${username}`, 'success');
-                } catch (error) {
-                    this.api.ui.showToast('移除成员失败: ' + error.message, 'error');
-                }
-            });
-        });
-
-        const deleteBtn = document.getElementById('tc-delete-project-btn');
-        if (deleteBtn) {
-            deleteBtn.addEventListener('click', async () => {
-                if (!confirm(`确定要删除项目「${this.project?.name || ''}」吗？删除后项目将不再显示。`)) return;
-                try {
-                    await this.projectService.deleteProject(this.currentProjectId, this.currentUserId);
-                    this.api.ui.showToast('项目已删除', 'success');
-                    this.eventBus.emit('project.deleted', { projectId: this.currentProjectId });
-                } catch (error) {
-                    this.api.ui.showToast('删除项目失败: ' + error.message, 'error');
                 }
             });
         }
     }
 
     /**
+     * 复制邀请码
+     */
+    copyInviteCode() {
+        if (!this.project?.inviteCode) {
+            this.api.ui.showToast('邀请码不存在', 'warning');
+            return;
+        }
+
+        navigator.clipboard.writeText(this.project.inviteCode).then(() => {
+            this.api.ui.showToast('邀请码已复制到剪贴板', 'success');
+        }).catch(() => {
+            this.api.ui.showToast('复制失败，请手动复制', 'error');
+        });
+    }
+
+    /**
+     * 确认重新生成邀请码
+     */
+    confirmRegenerateInvite() {
+        const modal = document.createElement('div');
+        modal.className = 'tc-modal open';
+        modal.innerHTML = `
+            <div class="tc-modal-content">
+                <div class="tc-modal-header">
+                    <span class="tc-modal-title">重新生成邀请码</span>
+                    <button class="tc-modal-close">×</button>
+                </div>
+                <div class="tc-modal-body">
+                    <p>确定要重新生成邀请码吗？</p>
+                    <p class="tc-warning">旧的邀请码将立即失效，已使用旧邀请码的用户不受影响。</p>
+                </div>
+                <div class="tc-modal-footer">
+                    <button class="tc-btn tc-btn-secondary tc-modal-cancel">取消</button>
+                    <button class="tc-btn tc-btn-danger" id="tc-confirm-regen">重新生成</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        modal.querySelector('.tc-modal-close').addEventListener('click', () => modal.remove());
+        modal.querySelector('.tc-modal-cancel').addEventListener('click', () => modal.remove());
+
+        modal.querySelector('#tc-confirm-regen').addEventListener('click', async () => {
+            try {
+                const newCode = await this.projectService.regenerateInviteCode(
+                    this.currentProjectId,
+                    this.currentUserId
+                );
+
+                this.project.inviteCode = newCode;
+                this.api.ui.showToast('邀请码已重新生成', 'success');
+                modal.remove();
+                this.render();
+                this.bindEvents();
+            } catch (error) {
+                this.api.ui.showToast('重新生成邀请码失败: ' + error.message, 'error');
+            }
+        });
+    }
+
+    /**
      * 刷新
      */
     async refresh() {
-        await this.loadContacts();
         await this.loadProject();
         this.render();
         this.bindEvents();
@@ -10259,7 +9380,6 @@ window.TCActivityView = ActivityView;
             this.inboxView = null;
             this.projectSettingsView = null;
             this.activityView = null;
-            this.helpCenter = null;
 
             // 按钮相关
             this.collabBtn = null;
@@ -10270,7 +9390,6 @@ window.TCActivityView = ActivityView;
             this.currentUserId = null;
             this.currentProjectId = null;
             this.currentView = 'tasks';
-            this.defaultTaskView = 'list';
         }
 
         /**
@@ -10398,6 +9517,10 @@ window.TCActivityView = ActivityView;
                 this.eventBus
             );
 
+            // 附件服务
+            const AttachmentService = window.TCAttachmentService;
+            this.attachmentService = new AttachmentService(this.api, this.storage);
+
             // 学习计划服务
             this.planService = new PlanService(
                 this.storage,
@@ -10436,8 +9559,21 @@ window.TCActivityView = ActivityView;
             try {
                 const basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
                 const response = await this.api.http.get(basePath + '/api/get_current_user');
-                if (response && response.uid) {
-                    this.currentUserId = response.uid;
+                const candidates = [
+                    response?.username,
+                    response?.userName,
+                    response?.handle,
+                    response?.account,
+                    response?.name,
+                    response?.nickname,
+                    response?.email ? String(response.email).split('@')[0] : '',
+                    response?.uid,
+                    response?.id
+                ].map(v => String(v || '').trim()).filter(Boolean);
+                if (candidates.length > 0) {
+                    const aliases = Array.from(new Set(candidates.map(v => window.TCUtils.normalizeUserId(v)).filter(Boolean)));
+                    window.TCCurrentUserAliases = aliases;
+                    this.currentUserId = aliases[0];
                 }
             } catch (error) {
                 console.warn('[团队协作] 获取用户信息失败，使用默认值');
@@ -10449,7 +9585,8 @@ window.TCActivityView = ActivityView;
                     userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
                     await this.api.storage.set('plugin:team-collab:temp-user-id', userId);
                 }
-                this.currentUserId = userId;
+                this.currentUserId = window.TCUtils.normalizeUserId(userId) || userId;
+                window.TCCurrentUserAliases = [this.currentUserId];
             }
 
             console.log('[团队协作] 当前用户 ID:', this.currentUserId);
@@ -10469,7 +9606,6 @@ window.TCActivityView = ActivityView;
             const PlanView = window.TCPlanView;
             const InboxView = window.TCInboxView;
             const ProjectSettingsView = window.TCProjectSettingsView;
-            const HelpCenter = window.TCHelpCenter;
 
             // 创建面板
             this.panel = new Panel(this.api);
@@ -10501,8 +9637,7 @@ window.TCActivityView = ActivityView;
                 this.panel,
                 this.taskService,
                 this.indexManager,
-                this.eventBus,
-                this.projectService
+                this.eventBus
             );
 
             // 创建任务详情
@@ -10513,7 +9648,7 @@ window.TCActivityView = ActivityView;
                 this.eventBus,
                 this.commentService,
                 this.markdownRenderer,
-                this.notificationService
+                this.attachmentService
             );
 
             // 创建评论输入框
@@ -10521,7 +9656,8 @@ window.TCActivityView = ActivityView;
                 this.panel,
                 this.commentService,
                 this.markdownRenderer,
-                this.eventBus
+                this.eventBus,
+                this.attachmentService
             );
 
             // 创建评论列表
@@ -10529,13 +9665,6 @@ window.TCActivityView = ActivityView;
                 this.panel,
                 this.commentService,
                 this.markdownRenderer,
-                this.eventBus
-            );
-
-            this.helpCenter = new HelpCenter(
-                this.panel,
-                this.taskService,
-                this.projectService,
                 this.eventBus
             );
 
@@ -10547,7 +9676,8 @@ window.TCActivityView = ActivityView;
                 this.eventBus,
                 this.projectService,
                 this.commentService,
-                this.markdownRenderer
+                this.markdownRenderer,
+                this.attachmentService
             );
 
             // 创建收件箱视图
@@ -10584,7 +9714,7 @@ window.TCActivityView = ActivityView;
             // 项目切换事件
             this.eventBus.on('project.changed', async (data) => {
                 this.currentProjectId = data.projectId;
-                await this.showTaskView('list');
+                await this.showTaskView();
             });
 
             // 视图切换事件
@@ -10592,14 +9722,11 @@ window.TCActivityView = ActivityView;
                 this.currentProjectId = data.projectId || this.currentProjectId;
                 switch (data.view) {
                     case 'tasks':
-                    case 'task-list':
-                        await this.showTaskView('list');
-                        break;
                     case 'task-board':
                         await this.showTaskView('board');
                         break;
-                    case 'help-center':
-                        await this.showHelpCenterView();
+                    case 'task-list':
+                        await this.showTaskView('list');
                         break;
                     case 'plans':
                         await this.showPlansView();
@@ -10632,21 +9759,6 @@ window.TCActivityView = ActivityView;
             this.eventBus.on('task.back', async () => {
                 await this.showTaskView();
             });
-
-            // 项目删除后刷新侧边栏与当前项目
-            this.eventBus.on('project.deleted', async (data) => {
-                if (this.currentProjectId === data.projectId) {
-                    this.currentProjectId = null;
-                }
-                await this.sidebar.init(this.currentUserId);
-                const projects = await this.projectService.getUserProjects(this.currentUserId);
-                if (projects.length > 0) {
-                    this.currentProjectId = projects[0].id;
-                    await this.showTaskView('list');
-                } else {
-                    this.panel.showEmpty('📋', '暂无项目', '先创建一个项目开始协作');
-                }
-            });
         }
 
         /**
@@ -10675,14 +9787,6 @@ window.TCActivityView = ActivityView;
                 return;
             }
             await this.planView.init(this.currentProjectId, this.currentUserId);
-        }
-
-        async showHelpCenterView() {
-            if (!this.currentProjectId) {
-                this.panel.showEmpty('🆘', '请选择项目', '在左侧选择一个项目查看待支援事项');
-                return;
-            }
-            await this.helpCenter.init(this.currentProjectId, this.currentUserId);
         }
 
         /**
@@ -10816,7 +9920,7 @@ window.TCActivityView = ActivityView;
                 const projects = await this.projectService.getUserProjects(this.currentUserId);
                 if (projects.length > 0) {
                     this.currentProjectId = projects[0].id;
-                    await this.showTaskView('list');
+                    await this.showTaskView('board');
                 }
             }
         }
