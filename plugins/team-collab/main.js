@@ -4747,6 +4747,74 @@ class Sidebar {
     }
 }
 
+// 团队协作插件 - 任务看板视图
+class TaskBoard {
+    constructor(panel, taskService, indexManager, eventBus, projectService, crypto) {
+        this.panel = panel;
+        this.taskService = taskService;
+        this.indexManager = indexManager;
+        this.eventBus = eventBus;
+        this.projectService = projectService;
+        this.crypto = crypto;
+        this.currentProjectId = null;
+        this.currentUserId = null;
+        this.tasks = [];
+    }
+
+    async init(projectId, userId) {
+        this.currentProjectId = projectId;
+        this.currentUserId = userId;
+        await this.loadTasks();
+        this.render();
+    }
+
+    async loadTasks() {
+        if (!this.currentProjectId) return;
+        this.tasks = await this.taskService.getProjectTasks(this.currentProjectId, this.currentUserId);
+    }
+
+    render() {
+        const html = `
+            <div class="tc-task-board">
+                <div class="tc-board-header">
+                    <div class="tc-board-title">任务看板</div>
+                    <div class="tc-board-actions">
+                        <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-add-task-board-btn">
+                            + 新建任务
+                        </button>
+                        <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-switch-list-btn">
+                            📋 列表视图
+                        </button>
+                    </div>
+                </div>
+                <div class="tc-board-columns">
+                    <div class="tc-board-column" data-status="todo">
+                        <div class="tc-column-header">待办</div>
+                        <div class="tc-column-content" id="tc-board-todo"></div>
+                    </div>
+                    <div class="tc-board-column" data-status="doing">
+                        <div class="tc-column-header">进行中</div>
+                        <div class="tc-column-content" id="tc-board-doing"></div>
+                    </div>
+                    <div class="tc-board-column" data-status="review">
+                        <div class="tc-column-header">审核中</div>
+                        <div class="tc-column-content" id="tc-board-review"></div>
+                    </div>
+                    <div class="tc-board-column" data-status="done">
+                        <div class="tc-column-header">已完成</div>
+                        <div class="tc-column-content" id="tc-board-done"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        this.panel.setContent(html);
+    }
+
+    destroy() {
+        // 清理
+    }
+}
+
 // 导出
 window.TCTaskBoard = TaskBoard;
 /**
