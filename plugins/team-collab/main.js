@@ -9928,7 +9928,8 @@ window.TCActivityView = ActivityView;
         // ===== Plugin =====
         const oldInitCurrentUser = TeamCollabPlugin.prototype.initCurrentUser;
         TeamCollabPlugin.prototype.initCurrentUser = async function(){
-            try { const response = await this.api.http.get('/api/get_current_user'); const candidates=[response?.username,response?.userName,response?.handle,response?.name,response?.email&&String(response.email).split('@')[0],response?.uid,response?.userId]; const found=candidates.find(v=>String(v||'').trim()); if(found) this.currentUserId=normalizeUserId(found); } catch(e){ console.warn('[团队协作] 获取用户信息失败，使用默认值'); }
+            const basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
+            try { const response = await this.api.http.get(basePath + '/api/get_current_user'); const candidates=[response?.username,response?.userName,response?.handle,response?.name,response?.email&&String(response.email).split('@')[0],response?.uid,response?.userId]; const found=candidates.find(v=>String(v||'').trim()); if(found) this.currentUserId=normalizeUserId(found); } catch(e){ console.warn('[团队协作] 获取用户信息失败，使用默认值'); }
             if(!this.currentUserId){ let userId=await this.api.storage.get('plugin:team-collab:temp-user-id'); if(!userId){ userId='user_'+Date.now()+'_'+Math.random().toString(36).substr(2,9); await this.api.storage.set('plugin:team-collab:temp-user-id', userId);} this.currentUserId=normalizeUserId(userId); }
             console.log('[团队协作] 当前用户 ID:', this.currentUserId);
         };
