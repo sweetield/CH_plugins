@@ -4748,6 +4748,9 @@ class Sidebar {
     }
 }
 
+// 导出
+window.TCSidebar = Sidebar;
+
 // 团队协作插件 - 任务看板视图
 class TaskBoard {
     constructor(panel, taskService, indexManager, eventBus, projectService, crypto) {
