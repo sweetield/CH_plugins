@@ -1972,23 +1972,120 @@
 }
 
 
-/* ===== 2026-03-28 修复补充样式 ===== */
-.tc-checklist-row { display:flex; gap:8px; margin-bottom:8px; }
-.tc-checklist-list { display:flex; flex-direction:column; gap:8px; }
-.tc-checklist-item { padding:6px 0; }
-.tc-participating-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; padding:16px; }
-.tc-project-card { border:1px solid var(--border-color,#e5e7eb); border-radius:12px; padding:16px; background:var(--bg-primary,#fff); box-shadow:0 1px 2px rgba(0,0,0,.04); }
-.tc-project-card-title { font-size:16px; font-weight:600; margin-bottom:8px; }
-.tc-project-card-desc { font-size:13px; color:var(--text-secondary,#6b7280); margin-bottom:12px; }
-.tc-project-card-actions { display:flex; justify-content:flex-end; }
-.tc-pending-attachments { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
-.tc-pending-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid var(--border-color,#e5e7eb); border-radius:999px; background:var(--bg-secondary,#f9fafb); font-size:12px; }
-.tc-pending-remove { border:none; background:none; cursor:pointer; color:#ef4444; font-size:14px; line-height:1; }
-.tc-comment-toolbar { display:flex; gap:8px; align-items:center; }
-.tc-comment-attachments { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
-.tc-comment-attachment { padding:8px 10px; border:1px solid var(--border-color,#e5e7eb); border-radius:8px; background:var(--bg-secondary,#f9fafb); }
-.tc-comment-attachment.is-image { padding:8px; }
-.tc-comment-image { display:block; max-width:320px; max-height:220px; border-radius:8px; border:1px solid var(--border-color,#e5e7eb); background:#fff; }
-.tc-comment-attachment-name { margin-top:6px; font-size:12px; color:var(--text-secondary,#6b7280); }
-.tc-inline-progress-row { display:flex; align-items:center; gap:8px; margin-top:8px; }
-.tc-remove-member-btn { margin-left:8px; }
+/* ==================== 2026-03-27 参与项目 / 评论真实附件上传 ==================== */
+.tc-list-subtitle,
+.tc-empty-subtext,
+.tc-project-card-meta {
+    font-size: 12px;
+    color: var(--text-secondary, #6b7280);
+}
+
+.tc-participating-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+    padding: 16px;
+}
+
+.tc-project-card {
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 12px;
+    background: var(--bg-primary, #ffffff);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.tc-project-card-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary, #1f2937);
+}
+
+.tc-project-card-desc {
+    font-size: 13px;
+    color: var(--text-secondary, #6b7280);
+    min-height: 38px;
+}
+
+.tc-comment-attachment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px 0;
+}
+
+.tc-comment-attachment-empty,
+.tc-pending-attachment-meta,
+.tc-comment-attachment-meta {
+    font-size: 12px;
+    color: var(--text-secondary, #6b7280);
+}
+
+.tc-pending-attachment {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 10px;
+    background: var(--bg-secondary, #f9fafb);
+}
+
+.tc-pending-attachment-name,
+.tc-comment-attachment-name {
+    font-size: 13px;
+    color: var(--text-primary, #1f2937);
+    word-break: break-all;
+}
+
+.tc-comment-attachments {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.tc-comment-attachment {
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 12px;
+    background: var(--bg-secondary, #f9fafb);
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+}
+
+.tc-comment-attachment.is-image img {
+    display: block;
+    width: 100%;
+    max-width: 360px;
+    max-height: 280px;
+    object-fit: contain;
+    background: #fff;
+}
+
+.tc-comment-attachment.is-image .tc-comment-attachment-meta {
+    padding: 8px 10px;
+}
+
+.tc-comment-attachment.is-file {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+}
+
+.tc-comment-attachment-link {
+    font-size: 12px;
+    color: var(--primary-color, #3b82f6);
+}
+
+.theme-dark .tc-project-card,
+.theme-dark .tc-pending-attachment,
+.theme-dark .tc-comment-attachment {
+    background: var(--bg-secondary, #374151);
+    border-color: var(--border-color, #4b5563);
+}
