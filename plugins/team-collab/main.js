@@ -826,7 +826,8 @@ class CryptoManager {
      */
     async init(api) {
         try {
-            const response = await api.http.get('/api/get_encryption_key');
+            const basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
+            const response = await api.http.get(basePath + '/api/get_encryption_key');
             this.encryptionKey = response.key;
             console.log('[CryptoManager] 加密密钥初始化成功');
         } catch (error) {
@@ -8353,7 +8354,8 @@ window.TCActivityView = ActivityView;
          */
         async initCurrentUser() {
             try {
-                const response = await this.api.http.get('/api/get_current_user');
+                const basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
+                const response = await this.api.http.get(basePath + '/api/get_current_user');
                 const candidates = [
                     response?.username,
                     response?.userName,
