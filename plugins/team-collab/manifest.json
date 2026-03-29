@@ -1,7 +1,7 @@
 {
   "id": "team-collab",
   "name": "团队协作",
-  "version": "3.1.6",
+  "version": "3.1.7",
   "description": "团队协作插件，适合团队开发：支持协作清单、评论、求助中心、通知与项目包导入导出",
   "author": "CC开发团队",
   "entry": "main.js",
