@@ -1106,32 +1106,49 @@ class StorageAdapter {
      * 保存数据到服务器端共享存储（跨用户可见）
      * @param {string} key - 存储键
      * @param {*} data - 数据
+     * @param {string} scope - 共享范围，默认为全局
      */
-    async saveToServerShared(key, data) {
+    async saveToServerShared(key, data, scope = 'global') {
         try {
-            await this.api.http.post(`${this.basePath}/api/team-collab/save_shared`, {
-                key: key,
-                value: data
-            });
-            console.log('[StorageAdapter] 保存到服务器共享存储成功:', key);
+            await this.api.storage.setShared(key, data, scope);
+            console.log('[StorageAdapter] 保存到服务器共享存储成功:', key, scope);
         } catch (error) {
             console.error('[StorageAdapter] 保存到服务器共享存储失败:', error);
+            throw error;
         }
     }
 
     /**
      * 从服务器端共享存储读取数据（跨用户可见）
      * @param {string} key - 存储键
+     * @param {string} scope - 共享范围，默认为全局
      * @returns {Promise<*>} 数据
      */
-    async loadFromServerShared(key) {
+    async loadFromServerShared(key, scope = 'global') {
         try {
-            const response = await this.api.http.get(`${this.basePath}/api/team-collab/get_shared`, { key: key });
-            console.log('[StorageAdapter] 从服务器共享存储加载成功:', key, response);
-            return response?.value || null;
+            const response = await this.api.storage.getShared(key, scope);
+            console.log('[StorageAdapter] 从服务器共享存储加载成功:', key, scope);
+            return response;
         } catch (error) {
             console.error('[StorageAdapter] 从服务器共享存储加载失败:', error);
             return null;
+        }
+    }
+
+    /**
+     * 从服务器端共享存储删除数据
+     * @param {string} key - 存储键
+     * @param {string} scope - 共享范围，默认为全局
+     * @returns {Promise<boolean>}
+     */
+    async removeFromServerShared(key, scope = 'global') {
+        try {
+            await this.api.storage.removeShared(key, scope);
+            console.log('[StorageAdapter] 从服务器共享存储删除成功:', key, scope);
+            return true;
+        } catch (error) {
+            console.error('[StorageAdapter] 从服务器共享存储删除失败:', error);
+            return false;
         }
     }
 
@@ -1280,9 +1297,11 @@ class StorageAdapter {
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
         await this.saveSharedBoth(keys.project(project.id), legacyKeys.project(project.id), project, true);
-        
-        // 同时保存到服务器端共享存储
-        await this.saveToServerShared(`project:${project.id}`, project);
+
+        // 同时保存到服务器端共享存储（使用群组 scope）
+        // 每个项目对应一个群组，使用项目 ID 作为群组 ID
+        const scope = `group:${project.id}`;
+        await this.saveToServerShared(`project:${project.id}`, project, scope);
     }
 
     /**
@@ -1291,13 +1310,14 @@ class StorageAdapter {
      * @returns {Promise<Object|null>}
      */
     async loadProject(projectId) {
-        // 首先尝试从服务器端共享存储加载
-        const serverData = await this.loadFromServerShared(`project:${projectId}`);
+        // 首先尝试从服务器端共享存储加载（使用群组 scope）
+        const scope = `group:${projectId}`;
+        const serverData = await this.loadFromServerShared(`project:${projectId}`, scope);
         if (serverData) {
             console.log('[StorageAdapter] 从服务器加载项目:', projectId);
             return serverData;
         }
-        
+
         // 如果服务器没有数据，从本地存储加载
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
@@ -1477,17 +1497,17 @@ class StorageAdapter {
     async saveProjectRegistry(projectIds) {
         const uniqueIds = Array.from(new Set((projectIds || []).filter(Boolean)));
         console.log('[StorageAdapter] 保存项目注册表:', uniqueIds);
-        
+
         // 保存到本地存储（用于备份）
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
         await this.saveSharedBoth(keys.projectRegistry(), legacyKeys.projectRegistry(), uniqueIds, false);
-        
+
         // 保存到服务器端共享存储（合并现有数据，而不是覆盖）
-        const existingData = await this.loadFromServerShared('project-registry') || [];
+        const existingData = await this.loadFromServerShared('project-registry', 'global') || [];
         const mergedData = Array.from(new Set([...existingData, ...uniqueIds]));
         console.log('[StorageAdapter] 合并后的项目注册表:', mergedData);
-        await this.saveToServerShared('project-registry', mergedData);
+        await this.saveToServerShared('project-registry', mergedData, 'global');
     }
 
     /**
@@ -1495,8 +1515,8 @@ class StorageAdapter {
      * @returns {Promise<Array>}
      */
     async loadProjectRegistry() {
-        // 首先尝试从服务器端共享存储加载
-        const serverData = await this.loadFromServerShared('project-registry');
+        // 首先尝试从服务器端共享存储加载（全局）
+        const serverData = await this.loadFromServerShared('project-registry', 'global');
         if (serverData && Array.isArray(serverData) && serverData.length > 0) {
             console.log('[StorageAdapter] 从服务器加载项目注册表:', serverData);
             
