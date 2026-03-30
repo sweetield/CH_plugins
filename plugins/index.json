@@ -37,7 +37,7 @@
     {
       "id": "team-collab",
       "name": "团队协作",
-      "version": "3.1.8",
+      "version": "3.1.7",
       "description": "团队协作插件，支持项目、任务、学习计划、评论、通知与项目包导入导出",
       "author": "CC 团队",
       "manifest_url": "./team-collab/manifest.json"
