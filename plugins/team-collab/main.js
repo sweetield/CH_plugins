@@ -1483,8 +1483,11 @@ class StorageAdapter {
         const legacyKeys = this.getLegacyKeys();
         await this.saveSharedBoth(keys.projectRegistry(), legacyKeys.projectRegistry(), uniqueIds, false);
         
-        // 保存到服务器端共享存储（跨用户可见）
-        await this.saveToServerShared('project-registry', uniqueIds);
+        // 保存到服务器端共享存储（合并现有数据，而不是覆盖）
+        const existingData = await this.loadFromServerShared('project-registry') || [];
+        const mergedData = Array.from(new Set([...existingData, ...uniqueIds]));
+        console.log('[StorageAdapter] 合并后的项目注册表:', mergedData);
+        await this.saveToServerShared('project-registry', mergedData);
     }
 
     /**
