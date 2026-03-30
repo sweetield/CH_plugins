@@ -1099,6 +1099,40 @@ class StorageAdapter {
     constructor(api, crypto) {
         this.api = api;
         this.crypto = crypto;
+        this.basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
+    }
+
+    /**
+     * 保存数据到服务器端共享存储（跨用户可见）
+     * @param {string} key - 存储键
+     * @param {*} data - 数据
+     */
+    async saveToServerShared(key, data) {
+        try {
+            await this.api.http.post(`${this.basePath}/api/team-collab/save_shared`, {
+                key: key,
+                value: data
+            });
+            console.log('[StorageAdapter] 保存到服务器共享存储成功:', key);
+        } catch (error) {
+            console.error('[StorageAdapter] 保存到服务器共享存储失败:', error);
+        }
+    }
+
+    /**
+     * 从服务器端共享存储读取数据（跨用户可见）
+     * @param {string} key - 存储键
+     * @returns {Promise<*>} 数据
+     */
+    async loadFromServerShared(key) {
+        try {
+            const response = await this.api.http.get(`${this.basePath}/api/team-collab/get_shared`, { key: key });
+            console.log('[StorageAdapter] 从服务器共享存储加载成功:', key, response);
+            return response?.value || null;
+        } catch (error) {
+            console.error('[StorageAdapter] 从服务器共享存储加载失败:', error);
+            return null;
+        }
     }
 
     /**
@@ -1246,6 +1280,9 @@ class StorageAdapter {
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
         await this.saveSharedBoth(keys.project(project.id), legacyKeys.project(project.id), project, true);
+        
+        // 同时保存到服务器端共享存储
+        await this.saveToServerShared(`project:${project.id}`, project);
     }
 
     /**
@@ -1254,6 +1291,14 @@ class StorageAdapter {
      * @returns {Promise<Object|null>}
      */
     async loadProject(projectId) {
+        // 首先尝试从服务器端共享存储加载
+        const serverData = await this.loadFromServerShared(`project:${projectId}`);
+        if (serverData) {
+            console.log('[StorageAdapter] 从服务器加载项目:', projectId);
+            return serverData;
+        }
+        
+        // 如果服务器没有数据，从本地存储加载
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
         return await this.loadSharedWithFallback(keys.project(projectId), legacyKeys.project(projectId), true);
@@ -1430,10 +1475,16 @@ class StorageAdapter {
      * @param {Array} projectIds - 项目 ID 列表
      */
     async saveProjectRegistry(projectIds) {
+        const uniqueIds = Array.from(new Set((projectIds || []).filter(Boolean)));
+        console.log('[StorageAdapter] 保存项目注册表:', uniqueIds);
+        
+        // 保存到本地存储（用于备份）
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
-        const uniqueIds = Array.from(new Set((projectIds || []).filter(Boolean)));
         await this.saveSharedBoth(keys.projectRegistry(), legacyKeys.projectRegistry(), uniqueIds, false);
+        
+        // 保存到服务器端共享存储（跨用户可见）
+        await this.saveToServerShared('project-registry', uniqueIds);
     }
 
     /**
@@ -1441,9 +1492,25 @@ class StorageAdapter {
      * @returns {Promise<Array>}
      */
     async loadProjectRegistry() {
+        // 首先尝试从服务器端共享存储加载
+        const serverData = await this.loadFromServerShared('project-registry');
+        if (serverData && Array.isArray(serverData) && serverData.length > 0) {
+            console.log('[StorageAdapter] 从服务器加载项目注册表:', serverData);
+            
+            // 同步到本地存储
+            const keys = this.getKeys();
+            const legacyKeys = this.getLegacyKeys();
+            await this.saveSharedBoth(keys.projectRegistry(), legacyKeys.projectRegistry(), serverData, false);
+            
+            return serverData;
+        }
+        
+        // 如果服务器没有数据，从本地存储加载
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
-        return await this.loadSharedWithFallback(keys.projectRegistry(), legacyKeys.projectRegistry(), false, []) || [];
+        const result = await this.loadSharedWithFallback(keys.projectRegistry(), legacyKeys.projectRegistry(), false, []) || [];
+        console.log('[StorageAdapter] 从本地加载项目注册表:', result);
+        return result;
     }
 
     /**
@@ -1570,15 +1637,26 @@ class IndexManager {
     async getUserProjects(userId) {
         const privateProjectIds = await this.storage.loadUserProjectIndex(userId);
         const sharedProjectIds = await this.storage.loadProjectRegistry();
+        
+        console.log('[IndexManager] getUserProjects - userId:', userId);
+        console.log('[IndexManager] privateProjectIds:', privateProjectIds);
+        console.log('[IndexManager] sharedProjectIds:', sharedProjectIds);
+        
         const projectIds = Array.from(new Set([...(privateProjectIds || []), ...(sharedProjectIds || [])]));
         const projects = [];
         const discoveredIds = [];
 
         for (const projectId of projectIds) {
             const project = await this.storage.loadProject(projectId);
-            if (!project || project.archivedAt || project.deletedAt) continue;
+            if (!project || project.archivedAt || project.deletedAt) {
+                console.log('[IndexManager] 跳过项目:', projectId, '原因:', !project ? '未找到' : project.archivedAt ? '已归档' : '已删除');
+                continue;
+            }
             const isMember = (project.members || []).some(member => member.userId === userId);
-            if (!isMember) continue;
+            if (!isMember) {
+                console.log('[IndexManager] 用户不是项目成员:', projectId, '成员列表:', project.members);
+                continue;
+            }
             projects.push(project);
             discoveredIds.push(projectId);
         }
@@ -1591,6 +1669,7 @@ class IndexManager {
 
         // 按更新时间排序
         projects.sort((a, b) => b.updatedAt - a.updatedAt);
+        console.log('[IndexManager] 返回项目数量:', projects.length);
         return projects;
     }
 
@@ -10758,8 +10837,11 @@ window.TCActivityView = ActivityView;
          * 显示我的参与视图
          */
         async showMyParticipationView() {
+            console.log('[TeamCollab] showMyParticipationView - currentUserId:', this.currentUserId);
             const allProjects = await this.projectService.getUserProjects(this.currentUserId);
+            console.log('[TeamCollab] allProjects:', allProjects);
             const participatedProjects = allProjects.filter(p => p.ownerId !== this.currentUserId);
+            console.log('[TeamCollab] participatedProjects:', participatedProjects);
 
             const html = `
                 <div class="tc-my-participation-view">
