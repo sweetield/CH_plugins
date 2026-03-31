@@ -4249,14 +4249,28 @@ class NotificationService {
 
         // 评论中被提及
         this.eventBus.on(C.EVENTS.MENTION_CREATED, async (data) => {
+            // 获取项目名和目标信息
+            let content = `有人在评论中@了你`;
+            let targetType = 'task';
+            let targetId = data.targetId || data.threadId;
+
+            try {
+                const project = await this.storage.loadProject(data.projectId);
+                if (project) {
+                    content = `在「${project.name}」中有人在评论中@了你`;
+                }
+            } catch (e) {
+                // 忽略错误，使用默认内容
+            }
+
             await this.createNotification({
                 userId: data.userId,
                 type: C.NOTIFICATION_TYPE.COMMENT_MENTION,
                 title: '你在评论中被提及',
-                content: `有人在评论中@了你`,
+                content: content,
                 projectId: data.projectId,
-                targetType: 'comment',
-                targetId: data.commentId
+                targetType: targetType,
+                targetId: targetId
             });
         });
 
@@ -5434,6 +5448,7 @@ class Sidebar {
                     <div class="tc-nav-item" data-view="help-center">
                         <span class="tc-nav-icon">🆘</span>
                         <span class="tc-nav-label">求助中心</span>
+                        <span class="tc-nav-badge" id="tc-help-count" style="display:none;">0</span>
                     </div>
                     <div class="tc-nav-item" data-view="plans">
                         <span class="tc-nav-icon">📚</span>
@@ -5485,6 +5500,7 @@ class Sidebar {
         this.bindEvents();
         this.updateTaskCount();
         this.updateInboxCount();
+        this.updateHelpCount();
     }
 
     /**
@@ -5557,6 +5573,17 @@ class Sidebar {
         this.eventBus.on(C.EVENTS.NOTIFICATION_RECEIVED, () => {
             this.updateInboxCount();
         });
+
+        // 监听求助事件，更新求助中心数量
+        this.eventBus.on(C.EVENTS.HELP_REQUESTED, () => {
+            this.updateHelpCount();
+        });
+        this.eventBus.on(C.EVENTS.HELP_CLAIMED, () => {
+            this.updateHelpCount();
+        });
+        this.eventBus.on(C.EVENTS.HELP_RESOLVED, () => {
+            this.updateHelpCount();
+        });
     }
 
     /**
@@ -5567,6 +5594,7 @@ class Sidebar {
         this.eventBus.emit('project.changed', { projectId: this.currentProjectId });
         this.updateTaskCount();
         this.updateInboxCount();
+        this.updateHelpCount();
     }
 
     /**
@@ -5610,6 +5638,29 @@ class Sidebar {
             }
         } catch (error) {
             console.error('[Sidebar] 更新收件箱未读数失败:', error);
+        }
+    }
+
+    /**
+     * 更新求助中心未处理数量
+     */
+    async updateHelpCount() {
+        if (!this.currentProjectId || !this.currentUserId) return;
+
+        try {
+            const tasks = await this.taskService.getProjectTasks(this.currentProjectId, this.currentUserId);
+            const helpCount = tasks.filter(t => t.helpRequested && t.helpStatus !== 'resolved').length;
+            const countEl = document.getElementById('tc-help-count');
+            if (countEl) {
+                if (helpCount > 0) {
+                    countEl.textContent = helpCount > 99 ? '99+' : helpCount;
+                    countEl.style.display = '';
+                } else {
+                    countEl.style.display = 'none';
+                }
+            }
+        } catch (error) {
+            console.error('[Sidebar] 更新求助中心数量失败:', error);
         }
     }
 
@@ -6948,11 +6999,13 @@ class HelpCenter {
         this.currentProjectId = null;
         this.currentUserId = null;
         this.tasks = [];
+        this.filter = 'all';
     }
 
     async init(projectId, userId) {
         this.currentProjectId = projectId;
         this.currentUserId = userId;
+        this.filter = 'all';
         await this.loadTasks();
         this.render();
         this.bindEvents();
@@ -6964,7 +7017,23 @@ class HelpCenter {
         this.tasks.sort((a, b) => b.updatedAt - a.updatedAt);
     }
 
+    getStats() {
+        const all = this.tasks;
+        const open = all.filter(t => t.helpStatus === 'open').length;
+        const claimed = all.filter(t => t.helpStatus === 'claimed').length;
+        const resolved = all.filter(t => t.helpStatus === 'resolved').length;
+        const myHelp = all.filter(t => (t.helperIds || []).includes(this.currentUserId)).length;
+        return { total: all.length, open, claimed, resolved, myHelp };
+    }
+
     render() {
+        const stats = this.getStats();
+        const filteredTasks = this.filter === 'all' ? this.tasks :
+            this.filter === 'open' ? this.tasks.filter(t => t.helpStatus === 'open') :
+            this.filter === 'claimed' ? this.tasks.filter(t => t.helpStatus === 'claimed') :
+            this.filter === 'my' ? this.tasks.filter(t => (t.helperIds || []).includes(this.currentUserId)) :
+            this.tasks;
+
         const html = `
             <div class="tc-help-center-view">
                 <div class="tc-list-header">
@@ -6977,14 +7046,32 @@ class HelpCenter {
                         <button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-back-to-list">返回清单</button>
                     </div>
                 </div>
+                <div class="tc-help-stats">
+                    <div class="tc-help-stat-item ${this.filter === 'all' ? 'active' : ''}" data-filter="all">
+                        <span class="tc-help-stat-count">${stats.total}</span>
+                        <span class="tc-help-stat-label">全部</span>
+                    </div>
+                    <div class="tc-help-stat-item ${this.filter === 'open' ? 'active' : ''}" data-filter="open">
+                        <span class="tc-help-stat-count" style="color:#ef4444">${stats.open}</span>
+                        <span class="tc-help-stat-label">待响应</span>
+                    </div>
+                    <div class="tc-help-stat-item ${this.filter === 'claimed' ? 'active' : ''}" data-filter="claimed">
+                        <span class="tc-help-stat-count" style="color:#f59e0b">${stats.claimed}</span>
+                        <span class="tc-help-stat-label">处理中</span>
+                    </div>
+                    <div class="tc-help-stat-item ${this.filter === 'my' ? 'active' : ''}" data-filter="my">
+                        <span class="tc-help-stat-count" style="color:#3b82f6">${stats.myHelp}</span>
+                        <span class="tc-help-stat-label">我参与的</span>
+                    </div>
+                </div>
                 <div class="tc-help-center-content">
-                    ${this.tasks.length === 0 ? `
+                    ${filteredTasks.length === 0 ? `
                         <div class="tc-list-empty">
                             <div class="tc-empty-icon">🤝</div>
                             <div class="tc-empty-text">当前没有待支援任务</div>
                             <div class="tc-empty-subtext">团队状态不错。你也可以主动发起一个新的求助项。</div>
                         </div>
-                    ` : this.tasks.map(task => this.renderCard(task)).join('')}
+                    ` : filteredTasks.map(task => this.renderCard(task)).join('')}
                 </div>
             </div>
         `;
@@ -6995,6 +7082,8 @@ class HelpCenter {
         const helpState = { open: '待响应', claimed: '处理中', resolved: '已解决', none: '无' }[task.helpStatus || 'open'];
         const assignees = (task.assigneeIds || []).length ? task.assigneeIds.join(', ') : '未分配';
         const helpers = (task.helperIds || []).length ? task.helperIds.join(', ') : '暂无';
+        const isHelper = (task.helperIds || []).includes(this.currentUserId);
+
         return `
             <div class="tc-help-card" data-task-id="${task.id}">
                 <div class="tc-help-card-top">
@@ -7010,7 +7099,8 @@ class HelpCenter {
                 </div>
                 <div class="tc-help-card-actions">
                     <button class="tc-mini-btn tc-help-open-detail" data-task-id="${task.id}">查看详情</button>
-                    <button class="tc-mini-btn tc-help-claim" data-task-id="${task.id}">我来处理</button>
+                    ${task.helpStatus === 'open' ? `<button class="tc-mini-btn tc-help-claim" data-task-id="${task.id}">我来处理</button>` : ''}
+                    ${isHelper && task.helpStatus === 'claimed' ? `<button class="tc-mini-btn tc-help-unclaim" data-task-id="${task.id}">退出协助</button>` : ''}
                     <button class="tc-mini-btn tc-help-resolve" data-task-id="${task.id}">标记解决</button>
                 </div>
             </div>
@@ -7034,6 +7124,15 @@ class HelpCenter {
             backBtn.addEventListener('click', () => this.eventBus.emit('view.changed', { view: 'tasks', projectId: this.currentProjectId }));
         }
 
+        // 筛选标签
+        document.querySelectorAll('.tc-help-stat-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.filter = item.dataset.filter;
+                this.render();
+                this.bindEvents();
+            });
+        });
+
         document.querySelectorAll('.tc-help-open-detail').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const task = await this.taskService.getTask(btn.dataset.taskId, this.currentUserId);
@@ -7044,6 +7143,12 @@ class HelpCenter {
         document.querySelectorAll('.tc-help-claim').forEach(btn => {
             btn.addEventListener('click', async () => {
                 await this.claimTask(btn.dataset.taskId);
+            });
+        });
+
+        document.querySelectorAll('.tc-help-unclaim').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                await this.unclaimTask(btn.dataset.taskId);
             });
         });
 
@@ -7070,6 +7175,26 @@ class HelpCenter {
             this.bindEvents();
         } catch (error) {
             this.panel.api.ui.showToast('认领失败: ' + error.message, 'error');
+        }
+    }
+
+    async unclaimTask(taskId) {
+        try {
+            const task = await this.taskService.getTask(taskId, this.currentUserId);
+            if (!task) return;
+            const helperIds = (task.helperIds || []).filter(id => id !== this.currentUserId);
+            const newStatus = helperIds.length > 0 ? 'claimed' : 'open';
+            await this.taskService.updateTask(taskId, {
+                helpRequested: true,
+                helpStatus: newStatus,
+                helperIds
+            }, this.currentUserId);
+            this.panel.api.ui.showToast('已退出协助', 'success');
+            await this.loadTasks();
+            this.render();
+            this.bindEvents();
+        } catch (error) {
+            this.panel.api.ui.showToast('退出协助失败: ' + error.message, 'error');
         }
     }
 
@@ -9792,10 +9917,17 @@ class InboxView {
         }
 
         // 根据类型跳转到相应视图
-        if (notification.targetType === 'task') {
-            this.eventBus.emit('task.detail', {
-                taskId: notification.targetId
+        if (notification.targetType === 'task' && notification.projectId) {
+            // 先切换到项目，再打开任务详情
+            this.eventBus.emit('project.changed', {
+                projectId: notification.projectId
             });
+            // 延迟打开任务详情，等待项目切换完成
+            setTimeout(() => {
+                this.eventBus.emit('task.detail', {
+                    taskId: notification.targetId
+                });
+            }, 100);
         } else if (notification.targetType === 'plan') {
             this.eventBus.emit('view.changed', {
                 view: 'plans'
@@ -10262,6 +10394,16 @@ class ActivityView {
             });
         });
 
+        // 成员离开
+        this.eventBus.on(C.EVENTS.MEMBER_LEFT, (data) => {
+            this.addActivity({
+                type: 'member_left',
+                projectId: data.projectId,
+                userId: data.userId,
+                description: '离开了项目'
+            });
+        });
+
         // 任务创建
         this.eventBus.on(C.EVENTS.TASK_CREATED, (data) => {
             this.addActivity({
@@ -10292,6 +10434,30 @@ class ActivityView {
             });
         });
 
+        // 任务删除
+        this.eventBus.on(C.EVENTS.TASK_DELETED, (data) => {
+            this.addActivity({
+                type: 'task_deleted',
+                projectId: data.projectId,
+                userId: data.userId,
+                targetType: 'task',
+                targetId: data.taskId,
+                description: '删除了任务'
+            });
+        });
+
+        // 任务指派
+        this.eventBus.on(C.EVENTS.TASK_ASSIGNED, (data) => {
+            this.addActivity({
+                type: 'task_assigned',
+                projectId: data.projectId,
+                userId: data.assigneeId,
+                targetType: 'task',
+                targetId: data.taskId,
+                description: `被指派了任务`
+            });
+        });
+
         // 评论添加
         this.eventBus.on(C.EVENTS.COMMENT_ADDED, (data) => {
             this.addActivity({
@@ -10315,6 +10481,54 @@ class ActivityView {
                 description: '提交了学习成果'
             });
         });
+
+        // 求助
+        this.eventBus.on(C.EVENTS.HELP_REQUESTED, (data) => {
+            this.addActivity({
+                type: 'help_requested',
+                projectId: data.projectId,
+                userId: data.requestedBy,
+                targetType: 'task',
+                targetId: data.taskId,
+                description: '发起了求助'
+            });
+        });
+
+        // 求助响应
+        this.eventBus.on(C.EVENTS.HELP_CLAIMED, (data) => {
+            this.addActivity({
+                type: 'help_claimed',
+                projectId: data.projectId,
+                userId: data.helperId,
+                targetType: 'task',
+                targetId: data.taskId,
+                description: '响应了求助'
+            });
+        });
+
+        // 求助解决
+        this.eventBus.on(C.EVENTS.HELP_RESOLVED, (data) => {
+            this.addActivity({
+                type: 'help_resolved',
+                projectId: data.projectId,
+                userId: data.resolvedBy,
+                targetType: 'task',
+                targetId: data.taskId,
+                description: '解决了求助'
+            });
+        });
+
+        // 附件上传
+        this.eventBus.on(C.EVENTS.ATTACHMENT_UPLOADED, (data) => {
+            this.addActivity({
+                type: 'attachment_uploaded',
+                projectId: data.projectId,
+                userId: data.userId,
+                targetType: 'attachment',
+                targetId: data.attachmentId,
+                description: '上传了附件'
+            });
+        });
     }
 
     /**
@@ -10330,8 +10544,51 @@ class ActivityView {
         this.activities.unshift(activity);
         
         // 限制活动数量
-        if (this.activities.length > 100) {
-            this.activities = this.activities.slice(0, 100);
+        if (this.activities.length > 200) {
+            this.activities = this.activities.slice(0, 200);
+        }
+
+        // 持久化到服务器共享存储
+        this.saveActivitiesToServer();
+    }
+
+    /**
+     * 保存活动到服务器
+     */
+    async saveActivitiesToServer() {
+        if (!this.currentProjectId) return;
+        try {
+            const projectActivities = this.activities.filter(a => a.projectId === this.currentProjectId);
+            await this.storage.saveToServerShared(`project-activity-index:${this.currentProjectId}`, projectActivities, 'global');
+        } catch (error) {
+            console.error('[ActivityView] 保存活动到服务器失败:', error);
+        }
+    }
+
+    /**
+     * 从服务器加载活动
+     */
+    async loadActivitiesFromServer() {
+        if (!this.currentProjectId) return;
+        try {
+            const serverData = await this.storage.loadFromServerShared(`project-activity-index:${this.currentProjectId}`, 'global');
+            if (serverData && Array.isArray(serverData)) {
+                // 合并到现有活动列表，去重
+                const existingIds = new Set(this.activities.map(a => a.id));
+                for (const act of serverData) {
+                    if (!existingIds.has(act.id)) {
+                        this.activities.push(act);
+                    }
+                }
+                // 按时间排序
+                this.activities.sort((a, b) => b.timestamp - a.timestamp);
+                // 限制数量
+                if (this.activities.length > 200) {
+                    this.activities = this.activities.slice(0, 200);
+                }
+            }
+        } catch (error) {
+            console.error('[ActivityView] 从服务器加载活动失败:', error);
         }
     }
 
@@ -10343,6 +10600,10 @@ class ActivityView {
     async init(projectId, userId) {
         this.currentProjectId = projectId;
         this.currentUserId = userId;
+        
+        // 从服务器加载历史活动
+        await this.loadActivitiesFromServer();
+        
         this.render();
         this.bindEvents();
     }
@@ -10395,16 +10656,23 @@ class ActivityView {
         const typeIcons = {
             'project_created': '📁',
             'member_joined': '👤',
+            'member_left': '👋',
             'task_created': '📋',
             'task_status_changed': '🔄',
+            'task_deleted': '🗑️',
+            'task_assigned': '🎯',
             'comment_added': '💬',
-            'plan_submitted': '📝'
+            'plan_submitted': '📝',
+            'help_requested': '🆘',
+            'help_claimed': '🤝',
+            'help_resolved': '✅',
+            'attachment_uploaded': '📎'
         };
 
         return `
             <div class="tc-activity-list">
                 ${activities.map(activity => `
-                    <div class="tc-activity-item">
+                    <div class="tc-activity-item" data-activity-id="${activity.id}">
                         <div class="tc-activity-icon">${typeIcons[activity.type] || '📌'}</div>
                         <div class="tc-activity-body">
                             <div class="tc-activity-meta">
@@ -10425,23 +10693,42 @@ class ActivityView {
     bindEvents() {
         const clearBtn = document.getElementById('tc-clear-activities');
         if (clearBtn) {
-            clearBtn.addEventListener('click', () => {
+            clearBtn.addEventListener('click', async () => {
                 if (confirm('确定要清空所有活动记录吗？')) {
-                    this.activities = this.currentProjectId
-                        ? this.activities.filter(a => a.projectId !== this.currentProjectId)
-                        : [];
+                    if (this.currentProjectId) {
+                        this.activities = this.activities.filter(a => a.projectId !== this.currentProjectId);
+                        await this.saveActivitiesToServer();
+                    } else {
+                        this.activities = [];
+                    }
                     this.render();
                     this.bindEvents();
                     this.panel.api.ui.showToast('活动记录已清空', 'success');
                 }
             });
         }
+
+        // 点击活动项跳转到目标
+        document.querySelectorAll('.tc-activity-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const activityId = item.dataset.activityId;
+                const activity = this.activities.find(a => a.id === activityId);
+                if (activity && activity.targetId && activity.targetType) {
+                    if (activity.targetType === 'task') {
+                        this.eventBus.emit('task.detail', { taskId: activity.targetId });
+                    } else if (activity.targetType === 'plan') {
+                        this.eventBus.emit('view.changed', { view: 'plans' });
+                    }
+                }
+            });
+        });
     }
 
     /**
      * 刷新
      */
     async refresh() {
+        await this.loadActivitiesFromServer();
         this.render();
         this.bindEvents();
     }
@@ -10955,45 +11242,147 @@ window.TCActivityView = ActivityView;
             const participatedProjects = allProjects.filter(p => p.ownerId !== this.currentUserId);
             console.log('[TeamCollab] participatedProjects:', participatedProjects);
 
+            // 收集用户在各项目的任务
+            let myTasks = [];
+            let myHelpTasks = [];
+            let totalTasks = 0;
+            let completedTasks = 0;
+            for (const p of allProjects) {
+                try {
+                    const tasks = await this.taskService.getProjectTasks(p.id, this.currentUserId);
+                    totalTasks += tasks.length;
+                    completedTasks += tasks.filter(t => t.status === 'done').length;
+                    const myProjectTasks = tasks.filter(t =>
+                        t.createdBy === this.currentUserId ||
+                        (t.assigneeIds || []).includes(this.currentUserId)
+                    );
+                    myTasks.push(...myProjectTasks.map(t => ({ ...t, projectName: p.name, projectId: p.id })));
+                    const helpTasks = tasks.filter(t => t.helpRequested && t.helpStatus !== 'resolved');
+                    myHelpTasks.push(...helpTasks.map(t => ({ ...t, projectName: p.name, projectId: p.id })));
+                } catch (e) {
+                    console.error('[TeamCollab] 获取项目任务失败:', p.id, e);
+                }
+            }
+            myTasks.sort((a, b) => b.updatedAt - a.updatedAt);
+            myTasks = myTasks.slice(0, 20);
+            myHelpTasks.sort((a, b) => b.updatedAt - a.updatedAt);
+
             const html = `
                 <div class="tc-my-participation-view">
                     <div class="tc-list-header">
                         <div>
                             <div class="tc-list-title">我的参与</div>
-                            <div class="tc-list-subtitle">显示其他人邀请你参与的项目，点击即可进入协同工作。</div>
+                            <div class="tc-list-subtitle">显示你参与的项目、任务和求助事项。</div>
                         </div>
                     </div>
                     <div class="tc-participation-content">
-                        ${participatedProjects.length === 0 ? `
+                        ${participatedProjects.length === 0 && myTasks.length === 0 ? `
                             <div class="tc-list-empty">
                                 <div class="tc-empty-icon">🤝</div>
                                 <div class="tc-empty-text">暂无参与的项目</div>
                                 <div class="tc-empty-subtext">当其他人邀请你加入项目时，会在这里显示。</div>
                             </div>
                         ` : `
-                            <div class="tc-participation-list">
-                                ${participatedProjects.map(p => {
-                                    const myRole = (p.members || []).find(m => m.userId === this.currentUserId);
-                                    const roleLabels = { owner: '创建者', admin: '管理员', member: '成员', guest: '访客' };
-                                    return `
-                                        <div class="tc-participation-card" data-project-id="${p.id}">
-                                            <div class="tc-participation-card-header">
-                                                <div class="tc-participation-card-title">${window.TCUtils.escapeHtml(p.name)}</div>
-                                                <span class="tc-role-badge tc-role-${myRole?.role || 'member'}">${roleLabels[myRole?.role] || '成员'}</span>
-                                            </div>
-                                            ${p.description ? `<div class="tc-participation-card-desc">${window.TCUtils.escapeHtml(window.TCUtils.truncateText(p.description, 80))}</div>` : ''}
-                                            <div class="tc-participation-card-meta">
-                                                <span>创建者：${window.TCUtils.escapeHtml(p.ownerId)}</span>
-                                                <span>成员：${(p.members || []).length} 人</span>
-                                                <span>任务：${p.stats?.totalTasks || 0} 个</span>
-                                            </div>
-                                            <div class="tc-participation-card-actions">
-                                                <button class="tc-btn tc-btn-primary tc-btn-sm tc-enter-project-btn" data-project-id="${p.id}">进入项目</button>
-                                            </div>
-                                        </div>
-                                    `;
-                                }).join('')}
+                            <!-- 统计概览 -->
+                            <div class="tc-participation-stats">
+                                <div class="tc-stat-card">
+                                    <div class="tc-stat-value">${participatedProjects.length}</div>
+                                    <div class="tc-stat-label">参与项目</div>
+                                </div>
+                                <div class="tc-stat-card">
+                                    <div class="tc-stat-value">${myTasks.length}</div>
+                                    <div class="tc-stat-label">我的任务</div>
+                                </div>
+                                <div class="tc-stat-card">
+                                    <div class="tc-stat-value">${completedTasks}</div>
+                                    <div class="tc-stat-label">已完成</div>
+                                </div>
+                                <div class="tc-stat-card tc-stat-card-warning">
+                                    <div class="tc-stat-value">${myHelpTasks.length}</div>
+                                    <div class="tc-stat-label">待支援</div>
+                                </div>
                             </div>
+
+                            <!-- 参与的项目 -->
+                            <div class="tc-participation-section">
+                                <h3 class="tc-section-title">参与的项目</h3>
+                                ${participatedProjects.length === 0 ? '<p class="tc-empty-text">暂无参与的项目</p>' : `
+                                    <div class="tc-participation-list">
+                                        ${participatedProjects.map(p => {
+                                            const myRole = (p.members || []).find(m => m.userId === this.currentUserId);
+                                            const roleLabels = { owner: '创建者', admin: '管理员', member: '成员', guest: '访客' };
+                                            return `
+                                                <div class="tc-participation-card" data-project-id="${p.id}">
+                                                    <div class="tc-participation-card-header">
+                                                        <div class="tc-participation-card-title">${window.TCUtils.escapeHtml(p.name)}</div>
+                                                        <span class="tc-role-badge tc-role-${myRole?.role || 'member'}">${roleLabels[myRole?.role] || '成员'}</span>
+                                                    </div>
+                                                    ${p.description ? `<div class="tc-participation-card-desc">${window.TCUtils.escapeHtml(window.TCUtils.truncateText(p.description, 80))}</div>` : ''}
+                                                    <div class="tc-participation-card-meta">
+                                                        <span>创建者：${window.TCUtils.escapeHtml(p.ownerId)}</span>
+                                                        <span>成员：${(p.members || []).length} 人</span>
+                                                        <span>任务：${p.stats?.totalTasks || 0} 个</span>
+                                                    </div>
+                                                    <div class="tc-participation-card-actions">
+                                                        <button class="tc-btn tc-btn-primary tc-btn-sm tc-enter-project-btn" data-project-id="${p.id}">进入项目</button>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                    </div>
+                                `}
+                            </div>
+
+                            <!-- 我的任务 -->
+                            <div class="tc-participation-section">
+                                <h3 class="tc-section-title">我的任务（最近 20 条）</h3>
+                                ${myTasks.length === 0 ? '<p class="tc-empty-text">暂无任务</p>' : `
+                                    <div class="tc-my-tasks-list">
+                                        ${myTasks.map(t => {
+                                            const statusLabels = { todo: '待办', doing: '进行中', review: '审核中', done: '已完成' };
+                                            const statusColors = { todo: '#6b7280', doing: '#3b82f6', review: '#f59e0b', done: '#22c55e' };
+                                            return `
+                                                <div class="tc-my-task-item" data-task-id="${t.id}" data-project-id="${t.projectId}">
+                                                    <div class="tc-my-task-status" style="background:${statusColors[t.status] || '#6b7280'}"></div>
+                                                    <div class="tc-my-task-info">
+                                                        <div class="tc-my-task-title">${window.TCUtils.escapeHtml(window.TCUtils.truncateText(t.title, 60))}</div>
+                                                        <div class="tc-my-task-meta">
+                                                            <span class="tc-my-task-project">${window.TCUtils.escapeHtml(t.projectName)}</span>
+                                                            <span class="tc-my-task-status-label" style="color:${statusColors[t.status]}">${statusLabels[t.status] || '待办'}</span>
+                                                            <span class="tc-my-task-time">${window.TCUtils.formatRelativeTime(t.updatedAt)}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                    </div>
+                                `}
+                            </div>
+
+                            <!-- 求助事项 -->
+                            ${myHelpTasks.length > 0 ? `
+                                <div class="tc-participation-section">
+                                    <h3 class="tc-section-title">🆘 待支援事项</h3>
+                                    <div class="tc-my-tasks-list">
+                                        ${myHelpTasks.map(t => {
+                                            const helpState = { open: '待响应', claimed: '处理中', resolved: '已解决' }[t.helpStatus || 'open'];
+                                            return `
+                                                <div class="tc-my-task-item tc-my-task-help" data-task-id="${t.id}" data-project-id="${t.projectId}">
+                                                    <div class="tc-my-task-status" style="background:#ef4444"></div>
+                                                    <div class="tc-my-task-info">
+                                                        <div class="tc-my-task-title">🆘 ${window.TCUtils.escapeHtml(window.TCUtils.truncateText(t.title, 60))}</div>
+                                                        <div class="tc-my-task-meta">
+                                                            <span class="tc-my-task-project">${window.TCUtils.escapeHtml(t.projectName)}</span>
+                                                            <span class="tc-my-task-help-status">${helpState}</span>
+                                                            <span class="tc-my-task-time">${window.TCUtils.formatRelativeTime(t.updatedAt)}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
                         `}
                     </div>
                 </div>
@@ -11001,6 +11390,7 @@ window.TCActivityView = ActivityView;
 
             this.panel.setContent(html);
 
+            // 绑定进入项目按钮
             document.querySelectorAll('.tc-enter-project-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -11010,11 +11400,25 @@ window.TCActivityView = ActivityView;
                 });
             });
 
+            // 绑定卡片点击
             document.querySelectorAll('.tc-participation-card').forEach(card => {
                 card.addEventListener('click', () => {
                     const projectId = card.dataset.projectId;
                     this.currentProjectId = projectId;
                     this.eventBus.emit('project.changed', { projectId });
+                });
+            });
+
+            // 绑定任务项点击
+            document.querySelectorAll('.tc-my-task-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const taskId = item.dataset.taskId;
+                    const projectId = item.dataset.projectId;
+                    this.currentProjectId = projectId;
+                    this.eventBus.emit('project.changed', { projectId });
+                    setTimeout(() => {
+                        this.eventBus.emit('task.detail', { taskId });
+                    }, 100);
                 });
             });
         }
