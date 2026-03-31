@@ -68,6 +68,7 @@ const EVENTS = {
     TASK_STATUS_CHANGED: 'task.status.changed',
     TASK_COMPLETED: 'task.completed',
     TASK_DELETED: 'task.deleted',
+    TASK_UPDATED: 'task.updated',
     COMMENT_ADDED: 'comment.added',
     MENTION_CREATED: 'mention.created',
     ATTACHMENT_UPLOADED: 'attachment.uploaded',
@@ -1626,6 +1627,9 @@ class StorageAdapter {
     async saveUserInbox(userId, notifications) {
         const keys = this.getKeys();
         await this.save(keys.inbox(userId), notifications);
+
+        // 同步到服务器端共享存储（确保跨设备/跨用户可见）
+        await this.saveToServerShared(`user-inbox:${userId}`, notifications, 'global');
     }
 
     /**
@@ -1634,6 +1638,13 @@ class StorageAdapter {
      * @returns {Promise<Array>}
      */
     async loadUserInbox(userId) {
+        // 首先尝试从服务器端共享存储加载
+        const serverData = await this.loadFromServerShared(`user-inbox:${userId}`, 'global');
+        if (serverData !== null && serverData !== undefined) {
+            return serverData;
+        }
+
+        // 回退到本地存储
         const keys = this.getKeys();
         return await this.load(keys.inbox(userId)) || [];
     }
@@ -3086,6 +3097,7 @@ class TaskService {
         if (updates.progress !== undefined) {
             task.progressMode = 'manual';
             task.progress = Math.min(100, Math.max(0, updates.progress));
+            activities.push({ field: 'progress', time: now });
         }
 
         task.updatedAt = now;
@@ -3093,6 +3105,87 @@ class TaskService {
 
         // 保存任务
         await this.storage.saveTask(task);
+
+        // 触发详细活动事件
+        for (const activity of activities) {
+            switch (activity.field) {
+                case 'title':
+                    this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
+                        taskId: task.id,
+                        projectId: task.projectId,
+                        userId,
+                        field: 'title',
+                        description: '修改了任务标题'
+                    });
+                    break;
+                case 'description':
+                    this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
+                        taskId: task.id,
+                        projectId: task.projectId,
+                        userId,
+                        field: 'description',
+                        description: '修改了任务描述'
+                    });
+                    break;
+                case 'assignees':
+                    this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
+                        taskId: task.id,
+                        projectId: task.projectId,
+                        userId,
+                        field: 'assignees',
+                        description: '修改了任务负责人'
+                    });
+                    break;
+                case 'progress':
+                    this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
+                        taskId: task.id,
+                        projectId: task.projectId,
+                        userId,
+                        field: 'progress',
+                        progress: task.progress,
+                        description: `更新了完成进度至 ${task.progress}%`
+                    });
+                    break;
+                case 'checklist':
+                    this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
+                        taskId: task.id,
+                        projectId: task.projectId,
+                        userId,
+                        field: 'checklist',
+                        description: '更新了检查清单'
+                    });
+                    break;
+                case 'helpRequested':
+                case 'helpStatus':
+                    const helpLabels = { open: '待响应', claimed: '处理中', resolved: '已解决', none: '无' };
+                    this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
+                        taskId: task.id,
+                        projectId: task.projectId,
+                        userId,
+                        field: 'help',
+                        description: `更新了求助状态为「${helpLabels[task.helpStatus] || '无'}」`
+                    });
+                    break;
+                case 'dueDate':
+                    this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
+                        taskId: task.id,
+                        projectId: task.projectId,
+                        userId,
+                        field: 'dueDate',
+                        description: '修改了截止日期'
+                    });
+                    break;
+                case 'tags':
+                    this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
+                        taskId: task.id,
+                        projectId: task.projectId,
+                        userId,
+                        field: 'tags',
+                        description: '更新了标签'
+                    });
+                    break;
+            }
+        }
 
         // 更新项目统计
         await this.updateProjectStats(task.projectId);
@@ -4257,7 +4350,19 @@ class NotificationService {
             try {
                 const project = await this.storage.loadProject(data.projectId);
                 if (project) {
-                    content = `在「${project.name}」中有人在评论中@了你`;
+                    // 尝试获取任务标题
+                    let taskTitle = '';
+                    if (data.targetId) {
+                        try {
+                            const task = await this.storage.loadTask(data.targetId);
+                            if (task) {
+                                taskTitle = await this.crypto.decrypt(task.title);
+                            }
+                        } catch (e) {}
+                    }
+                    content = taskTitle
+                        ? `在「${project.name}」的「${taskTitle}」评论中@了你`
+                        : `在「${project.name}」中有人在评论中@了你`;
                 }
             } catch (e) {
                 // 忽略错误，使用默认内容
@@ -7486,26 +7591,33 @@ class TaskDetail {
      * @returns {string} HTML
      */
     renderComments() {
-        return this.comments.map(comment => `
-            <div class="tc-comment-item" data-comment-id="${comment.id}">
-                <div class="tc-comment-avatar">
-                    <div class="tc-avatar">${this.getInitials(comment.authorId)}</div>
-                </div>
-                <div class="tc-comment-body">
-                    <div class="tc-comment-meta">
-                        <span class="tc-comment-author">${window.TCUtils.escapeHtml(comment.authorId)}</span>
-                        <span class="tc-comment-time">${window.TCUtils.formatRelativeTime(comment.createdAt)}</span>
+        return this.comments.map((comment, index) => {
+            const floor = index + 1;
+            const replyMatch = comment.body.match(/^回复\s*#(\d+)\s*[:：\s]*/);
+            const replyTarget = replyMatch ? parseInt(replyMatch[1]) : null;
+            return `
+                <div class="tc-comment-item" data-comment-id="${comment.id}" data-floor="${floor}" id="floor-${floor}">
+                    <div class="tc-comment-avatar">
+                        <div class="tc-avatar">${this.getInitials(comment.authorId)}</div>
                     </div>
-                    <div class="tc-comment-content">${this.markdown.renderSafe(comment.body)}</div>
-                    <div class="tc-comment-actions">
-                        <button class="tc-action-btn tc-reply-btn" data-author-id="${comment.authorId}">回复</button>
-                        ${comment.authorId === this.currentUserId ? `
-                            <button class="tc-action-btn tc-delete-comment-btn" data-comment-id="${comment.id}">删除</button>
-                        ` : ''}
+                    <div class="tc-comment-body">
+                        <div class="tc-comment-meta">
+                            <span class="tc-comment-floor">#${floor}</span>
+                            <span class="tc-comment-author">${window.TCUtils.escapeHtml(comment.authorId)}</span>
+                            <span class="tc-comment-time">${window.TCUtils.formatRelativeTime(comment.createdAt)}</span>
+                            ${replyTarget ? `<a class="tc-comment-reply-link" href="#floor-${replyTarget}" data-target-floor="${replyTarget}">回复 #${replyTarget}</a>` : ''}
+                        </div>
+                        <div class="tc-comment-content">${this.markdown.renderSafe(comment.body)}</div>
+                        <div class="tc-comment-actions">
+                            <button class="tc-action-btn tc-reply-btn" data-author-id="${comment.authorId}" data-floor="${floor}">回复</button>
+                            ${comment.authorId === this.currentUserId ? `
+                                <button class="tc-action-btn tc-delete-comment-btn" data-comment-id="${comment.id}">删除</button>
+                            ` : ''}
+                        </div>
                     </div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
     }
 
     /**
@@ -7613,7 +7725,22 @@ class TaskDetail {
         document.querySelectorAll('.tc-reply-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const authorId = btn.dataset.authorId;
-                this.replyToAuthor(authorId);
+                const floor = btn.dataset.floor;
+                this.replyToAuthor(authorId, floor);
+            });
+        });
+
+        // 楼层跳转链接
+        document.querySelectorAll('.tc-comment-reply-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetFloor = link.dataset.targetFloor;
+                const targetEl = document.querySelector(`.tc-comment-item[data-floor="${targetFloor}"]`);
+                if (targetEl) {
+                    targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    targetEl.classList.add('tc-comment-highlight');
+                    setTimeout(() => targetEl.classList.remove('tc-comment-highlight'), 2000);
+                }
             });
         });
 
@@ -7681,11 +7808,13 @@ class TaskDetail {
     /**
      * 回复作者
      * @param {string} authorId - 作者 ID
+     * @param {string} floor - 楼层号（可选）
      */
-    replyToAuthor(authorId) {
+    replyToAuthor(authorId, floor) {
         const commentInput = document.getElementById('tc-comment-input');
         if (commentInput) {
-            commentInput.value = `@${authorId} `;
+            const prefix = floor ? `回复 #${floor} @${authorId} ` : `@${authorId} `;
+            commentInput.value = prefix;
             commentInput.focus();
         }
     }
@@ -8435,28 +8564,40 @@ class CommentList {
      * 渲染评论列表
      */
     renderComments() {
-        return this.comments.map(comment => this.renderComment(comment)).join('');
+        return this.comments.map((comment, index) => this.renderComment(comment, index + 1)).join('');
     }
 
     /**
      * 渲染单条评论
      * @param {Object} comment - 评论对象
+     * @param {number} floor - 楼层号
      */
-    renderComment(comment) {
+    renderComment(comment, floor) {
         const isAuthor = comment.authorId === this.currentUserId;
         const timeAgo = window.TCUtils.formatRelativeTime(comment.createdAt);
         const bodyHtml = this.markdown.renderSafe(comment.body);
 
+        // 检查是否是回复某楼的评论
+        let replyTarget = null;
+        if (comment.body) {
+            const replyMatch = comment.body.match(/^回复\s*#(\d+)\s*[:：\s]*/);
+            if (replyMatch) {
+                replyTarget = parseInt(replyMatch[1]);
+            }
+        }
+
         return `
-            <div class="tc-comment-item" data-comment-id="${comment.id}">
+            <div class="tc-comment-item" data-comment-id="${comment.id}" data-floor="${floor}">
                 <div class="tc-comment-avatar">
                     <div class="tc-avatar">${this.getInitials(comment.authorId)}</div>
                 </div>
                 <div class="tc-comment-body">
                     <div class="tc-comment-meta">
+                        <span class="tc-comment-floor">#${floor}</span>
                         <span class="tc-comment-author">${window.TCUtils.escapeHtml(comment.authorId)}</span>
                         <span class="tc-comment-time">${timeAgo}</span>
                         ${comment.updatedAt > comment.createdAt ? '<span class="tc-comment-edited">(已编辑)</span>' : ''}
+                        ${replyTarget ? `<a class="tc-comment-reply-link" href="#floor-${replyTarget}" data-target-floor="${replyTarget}">回复 #${replyTarget}</a>` : ''}
                     </div>
                     <div class="tc-comment-content">${bodyHtml}</div>
                     ${comment.mentions && comment.mentions.length > 0 ? `
@@ -8465,7 +8606,7 @@ class CommentList {
                         </div>
                     ` : ''}
                     <div class="tc-comment-actions">
-                        <button class="tc-action-btn tc-reply-btn" data-comment-id="${comment.id}">回复</button>
+                        <button class="tc-action-btn tc-reply-btn" data-comment-id="${comment.id}" data-floor="${floor}">回复</button>
                         ${isAuthor ? `
                             <button class="tc-action-btn tc-edit-btn" data-comment-id="${comment.id}">编辑</button>
                             <button class="tc-action-btn tc-delete-btn" data-comment-id="${comment.id}">删除</button>
@@ -8496,7 +8637,22 @@ class CommentList {
         this.container.querySelectorAll('.tc-reply-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const commentId = btn.dataset.commentId;
-                this.replyToComment(commentId);
+                const floor = btn.dataset.floor;
+                this.replyToComment(commentId, floor);
+            });
+        });
+
+        // 楼层跳转链接
+        this.container.querySelectorAll('.tc-comment-reply-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetFloor = link.dataset.targetFloor;
+                const targetEl = this.container.querySelector(`.tc-comment-item[data-floor="${targetFloor}"]`);
+                if (targetEl) {
+                    targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    targetEl.classList.add('tc-comment-highlight');
+                    setTimeout(() => targetEl.classList.remove('tc-comment-highlight'), 2000);
+                }
             });
         });
 
@@ -8520,14 +8676,16 @@ class CommentList {
     /**
      * 回复评论
      * @param {string} commentId - 评论 ID
+     * @param {string} floor - 楼层号
      */
-    replyToComment(commentId) {
+    replyToComment(commentId, floor) {
         const comment = this.comments.find(c => c.id === commentId);
         if (comment) {
-            // 触发回复事件
+            // 触发回复事件，带上楼层信息
             this.eventBus.emit('comment.reply', {
                 commentId,
-                authorId: comment.authorId
+                authorId: comment.authorId,
+                floor: floor
             });
         }
     }
@@ -10447,6 +10605,19 @@ class ActivityView {
             });
         });
 
+        // 任务更新（标题/描述/进度/求助等）
+        this.eventBus.on(C.EVENTS.TASK_UPDATED, (data) => {
+            this.addActivity({
+                type: 'task_updated',
+                projectId: data.projectId,
+                userId: data.userId,
+                targetType: 'task',
+                targetId: data.taskId,
+                field: data.field,
+                description: data.description || '修改了任务'
+            });
+        });
+
         // 任务指派
         this.eventBus.on(C.EVENTS.TASK_ASSIGNED, (data) => {
             this.addActivity({
@@ -10662,6 +10833,7 @@ class ActivityView {
             'task_status_changed': '🔄',
             'task_deleted': '🗑️',
             'task_assigned': '🎯',
+            'task_updated': '✏️',
             'comment_added': '💬',
             'plan_submitted': '📝',
             'help_requested': '🆘',
