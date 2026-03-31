@@ -5384,7 +5384,7 @@ window.TCPanel = Panel;
  */
 
 class Sidebar {
-    constructor(panel, projectService, indexManager, crypto, eventBus, importExportService, notificationService) {
+    constructor(panel, projectService, indexManager, crypto, eventBus, importExportService, notificationService, taskService) {
         this.panel = panel;
         this.projectService = projectService;
         this.indexManager = indexManager;
@@ -5392,6 +5392,7 @@ class Sidebar {
         this.eventBus = eventBus;
         this.importExportService = importExportService;
         this.notificationService = notificationService;
+        this.taskService = taskService;
         this.currentUserId = null;
         this.currentProjectId = null;
     }
@@ -11002,7 +11003,8 @@ window.TCActivityView = ActivityView;
                 this.crypto,
                 this.eventBus,
                 this.importExportService,
-                this.notificationService
+                this.notificationService,
+                this.taskService
             );
 
             // 创建任务看板
