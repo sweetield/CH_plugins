@@ -3014,14 +3014,14 @@ class TaskService {
         }
 
         if (updates.priority !== undefined) {
+            activities.push({ field: 'priority', _beforePriority: task.priority, time: now });
             task.priority = updates.priority;
-            activities.push({ field: 'priority', time: now });
         }
 
         if (updates.assigneeIds !== undefined) {
             const oldAssignees = task.assigneeIds || [];
+            activities.push({ field: 'assignees', _beforeAssignees: [...oldAssignees], time: now });
             task.assigneeIds = updates.assigneeIds;
-            activities.push({ field: 'assignees', time: now });
 
             // 通知新分配的用户
             const newAssignees = updates.assigneeIds.filter(id => !oldAssignees.includes(id));
@@ -3036,8 +3036,8 @@ class TaskService {
         }
 
         if (updates.dueDate !== undefined) {
+            activities.push({ field: 'dueDate', _beforeDueDate: task.dueDate, time: now });
             task.dueDate = updates.dueDate;
-            activities.push({ field: 'dueDate', time: now });
         }
 
         if (updates.visibility !== undefined) {
@@ -3051,11 +3051,12 @@ class TaskService {
         }
 
         if (updates.tags !== undefined) {
+            activities.push({ field: 'tags', _beforeTags: task.tags ? [...task.tags] : [], time: now });
             task.tags = updates.tags;
-            activities.push({ field: 'tags', time: now });
         }
 
         if (updates.checklist !== undefined) {
+            activities.push({ field: 'checklist', _beforeChecklist: task.checklist ? [...task.checklist] : [], time: now });
             task.checklist = this.normalizeChecklist(updates.checklist);
             task.progressMode = task.checklist.length > 0 ? 'checklist' : task.progressMode;
             if (task.checklist.length > 0) {
@@ -3076,12 +3077,12 @@ class TaskService {
             if (!task.helpRequested && updates.helpStatus === undefined) {
                 task.helpStatus = 'none';
             }
-            activities.push({ field: 'helpRequested', time: now });
+            activities.push({ field: 'helpRequested', _beforeHelpStatus: task.helpStatus, time: now });
         }
 
         if (updates.helpStatus !== undefined) {
+            activities.push({ field: 'helpStatus', _beforeHelpStatus: task.helpStatus, time: now });
             task.helpStatus = updates.helpStatus;
-            activities.push({ field: 'helpStatus', time: now });
         }
 
         if (updates.helpMessage !== undefined) {
@@ -3095,9 +3096,9 @@ class TaskService {
         }
 
         if (updates.progress !== undefined) {
+            activities.push({ field: 'progress', _beforeProgress: task.progress || 0, time: now });
             task.progressMode = 'manual';
             task.progress = Math.min(100, Math.max(0, updates.progress));
-            activities.push({ field: 'progress', time: now });
         }
 
         task.updatedAt = now;
@@ -3106,84 +3107,163 @@ class TaskService {
         // 保存任务
         await this.storage.saveTask(task);
 
-        // 触发详细活动事件
+        // 触发详细活动事件（包含修改前后的值）
         for (const activity of activities) {
             switch (activity.field) {
-                case 'title':
+                case 'title': {
+                    const afterTitle = updates.title || '';
                     this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
                         taskId: task.id,
                         projectId: task.projectId,
                         userId,
                         field: 'title',
-                        description: '修改了任务标题'
+                        before: '原内容',
+                        after: afterTitle,
+                        description: `将任务标题修改为「${afterTitle}」`
                     });
                     break;
-                case 'description':
+                }
+                case 'description': {
+                    const afterDesc = updates.description || '';
+                    const afterShort = afterDesc ? afterDesc.substring(0, 30) + (afterDesc.length > 30 ? '...' : '') : '空';
                     this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
                         taskId: task.id,
                         projectId: task.projectId,
                         userId,
                         field: 'description',
-                        description: '修改了任务描述'
+                        before: '原内容',
+                        after: afterShort,
+                        description: `修改了任务描述为「${afterShort}」`
                     });
                     break;
-                case 'assignees':
+                }
+                case 'assignees': {
+                    const oldAssignees = activity._beforeAssignees || [];
+                    const newAssignees = updates.assigneeIds || [];
+                    const added = newAssignees.filter(id => !oldAssignees.includes(id));
+                    const removed = oldAssignees.filter(id => !newAssignees.includes(id));
+                    let desc = '修改了任务负责人';
+                    if (added.length > 0 && removed.length > 0) {
+                        desc = `将负责人从「${removed.join(', ')}」更换为「${added.join(', ')}」`;
+                    } else if (added.length > 0) {
+                        desc = `添加了负责人「${added.join(', ')}」`;
+                    } else if (removed.length > 0) {
+                        desc = `移除了负责人「${removed.join(', ')}」`;
+                    }
                     this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
                         taskId: task.id,
                         projectId: task.projectId,
                         userId,
                         field: 'assignees',
-                        description: '修改了任务负责人'
+                        before: oldAssignees.join(', ') || '无',
+                        after: newAssignees.join(', ') || '无',
+                        description: desc
                     });
                     break;
-                case 'progress':
+                }
+                case 'status': {
+                    const statusLabels = { todo: '待办', doing: '进行中', review: '审核中', done: '已完成' };
+                    const fromLabel = statusLabels[activity.from] || activity.from;
+                    const toLabel = statusLabels[activity.to] || activity.to;
+                    this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
+                        taskId: task.id,
+                        projectId: task.projectId,
+                        userId,
+                        field: 'status',
+                        before: fromLabel,
+                        after: toLabel,
+                        description: `将任务状态从「${fromLabel}」改为「${toLabel}」`
+                    });
+                    break;
+                }
+                case 'priority': {
+                    const priorityLabels = { low: '低', medium: '中', high: '高', urgent: '紧急' };
+                    const beforePriority = priorityLabels[activity._beforePriority] || activity._beforePriority || '未知';
+                    const afterPriority = priorityLabels[updates.priority] || updates.priority || '未知';
+                    this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
+                        taskId: task.id,
+                        projectId: task.projectId,
+                        userId,
+                        field: 'priority',
+                        before: beforePriority,
+                        after: afterPriority,
+                        description: `将优先级从「${beforePriority}」改为「${afterPriority}」`
+                    });
+                    break;
+                }
+                case 'progress': {
+                    const beforeProgress = activity._beforeProgress ?? 0;
+                    const afterProgress = task.progress;
                     this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
                         taskId: task.id,
                         projectId: task.projectId,
                         userId,
                         field: 'progress',
-                        progress: task.progress,
-                        description: `更新了完成进度至 ${task.progress}%`
+                        before: beforeProgress,
+                        after: afterProgress,
+                        description: `将完成进度从 ${beforeProgress}% 更新到 ${afterProgress}%`
                     });
                     break;
-                case 'checklist':
+                }
+                case 'checklist': {
+                    const beforeCount = (activity._beforeChecklist || []).length;
+                    const afterCount = (task.checklist || []).length;
+                    const completedCount = (task.checklist || []).filter(c => c.completed).length;
                     this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
                         taskId: task.id,
                         projectId: task.projectId,
                         userId,
                         field: 'checklist',
-                        description: '更新了检查清单'
+                        before: `${beforeCount} 项`,
+                        after: `${afterCount} 项（已完成 ${completedCount} 项）`,
+                        description: `更新了检查清单：${beforeCount} 项 → ${afterCount} 项（已完成 ${completedCount} 项）`
                     });
                     break;
+                }
                 case 'helpRequested':
-                case 'helpStatus':
+                case 'helpStatus': {
                     const helpLabels = { open: '待响应', claimed: '处理中', resolved: '已解决', none: '无' };
+                    const beforeHelp = helpLabels[activity._beforeHelpStatus] || '无';
+                    const afterHelp = helpLabels[task.helpStatus] || '无';
                     this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
                         taskId: task.id,
                         projectId: task.projectId,
                         userId,
                         field: 'help',
-                        description: `更新了求助状态为「${helpLabels[task.helpStatus] || '无'}」`
+                        before: beforeHelp,
+                        after: afterHelp,
+                        description: `将求助状态从「${beforeHelp}」改为「${afterHelp}」`
                     });
                     break;
-                case 'dueDate':
+                }
+                case 'dueDate': {
+                    const beforeDate = activity._beforeDueDate ? new Date(activity._beforeDueDate).toLocaleDateString('zh-CN') : '无';
+                    const afterDate = updates.dueDate ? new Date(updates.dueDate).toLocaleDateString('zh-CN') : '已移除';
                     this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
                         taskId: task.id,
                         projectId: task.projectId,
                         userId,
                         field: 'dueDate',
-                        description: '修改了截止日期'
+                        before: beforeDate,
+                        after: afterDate,
+                        description: `将截止日期从「${beforeDate}」改为「${afterDate}」`
                     });
                     break;
-                case 'tags':
+                }
+                case 'tags': {
+                    const beforeTags = (activity._beforeTags || []).join(', ') || '无';
+                    const afterTags = (updates.tags || []).join(', ') || '无';
                     this.eventBus.emit(C.EVENTS.TASK_UPDATED, {
                         taskId: task.id,
                         projectId: task.projectId,
                         userId,
                         field: 'tags',
-                        description: '更新了标签'
+                        before: beforeTags,
+                        after: afterTags,
+                        description: `将标签从「${beforeTags}」改为「${afterTags}」`
                     });
                     break;
+                }
             }
         }
 
@@ -5489,7 +5569,7 @@ window.TCPanel = Panel;
  */
 
 class Sidebar {
-    constructor(panel, projectService, indexManager, crypto, eventBus, importExportService, notificationService, taskService) {
+    constructor(panel, projectService, indexManager, crypto, eventBus, importExportService, notificationService, taskService, storage) {
         this.panel = panel;
         this.projectService = projectService;
         this.indexManager = indexManager;
@@ -5498,6 +5578,7 @@ class Sidebar {
         this.importExportService = importExportService;
         this.notificationService = notificationService;
         this.taskService = taskService;
+        this.storage = storage;
         this.currentUserId = null;
         this.currentProjectId = null;
     }
@@ -5568,6 +5649,7 @@ class Sidebar {
                     <div class="tc-nav-item" data-view="activity">
                         <span class="tc-nav-icon">📊</span>
                         <span class="tc-nav-label">活动流</span>
+                        <span class="tc-nav-badge" id="tc-activity-count" style="display:none;">0</span>
                     </div>
                     <div class="tc-nav-item" data-view="project-settings">
                         <span class="tc-nav-icon">⚙️</span>
@@ -5607,6 +5689,7 @@ class Sidebar {
         this.updateTaskCount();
         this.updateInboxCount();
         this.updateHelpCount();
+        this.updateActivityCount();
     }
 
     /**
@@ -5690,6 +5773,18 @@ class Sidebar {
         this.eventBus.on(C.EVENTS.HELP_RESOLVED, () => {
             this.updateHelpCount();
         });
+
+        // 监听活动事件，更新活动流未读数
+        this.eventBus.on(C.EVENTS.TASK_CREATED, () => { this.updateActivityCount(); });
+        this.eventBus.on(C.EVENTS.TASK_UPDATED, () => { this.updateActivityCount(); });
+        this.eventBus.on(C.EVENTS.TASK_DELETED, () => { this.updateActivityCount(); });
+        this.eventBus.on(C.EVENTS.TASK_STATUS_CHANGED, () => { this.updateActivityCount(); });
+        this.eventBus.on(C.EVENTS.COMMENT_ADDED, () => { this.updateActivityCount(); });
+        this.eventBus.on(C.EVENTS.PLAN_SUBMITTED, () => { this.updateActivityCount(); });
+        this.eventBus.on(C.EVENTS.MEMBER_JOINED, () => { this.updateActivityCount(); });
+        this.eventBus.on(C.EVENTS.HELP_REQUESTED, () => { this.updateActivityCount(); });
+        this.eventBus.on(C.EVENTS.HELP_CLAIMED, () => { this.updateActivityCount(); });
+        this.eventBus.on(C.EVENTS.HELP_RESOLVED, () => { this.updateActivityCount(); });
     }
 
     /**
@@ -5701,6 +5796,7 @@ class Sidebar {
         this.updateTaskCount();
         this.updateInboxCount();
         this.updateHelpCount();
+        this.updateActivityCount();
     }
 
     /**
@@ -5767,6 +5863,38 @@ class Sidebar {
             }
         } catch (error) {
             console.error('[Sidebar] 更新求助中心数量失败:', error);
+        }
+    }
+
+    /**
+     * 更新活动流未读数量
+     */
+    async updateActivityCount() {
+        if (!this.currentProjectId || !this.currentUserId) return;
+
+        try {
+            // 从服务器加载活动数据
+            const serverData = await this.storage.loadFromServerShared(`project-activity-index:${this.currentProjectId}`, 'global');
+            if (!serverData || !Array.isArray(serverData)) {
+                const countEl = document.getElementById('tc-activity-count');
+                if (countEl) countEl.style.display = 'none';
+                return;
+            }
+
+            // 获取用户上次查看时间
+            const lastViewed = await this.storage.load(`activity-last-viewed:${this.currentUserId}:${this.currentProjectId}`) || 0;
+            const newCount = serverData.filter(a => a.timestamp > lastViewed).length;
+            const countEl = document.getElementById('tc-activity-count');
+            if (countEl) {
+                if (newCount > 0) {
+                    countEl.textContent = newCount > 99 ? '99+' : newCount;
+                    countEl.style.display = '';
+                } else {
+                    countEl.style.display = 'none';
+                }
+            }
+        } catch (error) {
+            console.error('[Sidebar] 更新活动流数量失败:', error);
         }
     }
 
@@ -10773,6 +10901,14 @@ class ActivityView {
         this.currentProjectId = projectId;
         this.currentUserId = userId;
         
+        // 记录查看时间，用于未读数计算
+        const now = Date.now();
+        try {
+            await this.storage.save(`activity-last-viewed:${userId}:${projectId}`, now);
+        } catch (e) {
+            console.error('[ActivityView] 保存查看时间失败:', e);
+        }
+        
         // 从服务器加载历史活动
         await this.loadActivitiesFromServer();
         
@@ -10844,18 +10980,28 @@ class ActivityView {
 
         return `
             <div class="tc-activity-list">
-                ${activities.map(activity => `
-                    <div class="tc-activity-item" data-activity-id="${activity.id}">
-                        <div class="tc-activity-icon">${typeIcons[activity.type] || '📌'}</div>
-                        <div class="tc-activity-body">
-                            <div class="tc-activity-meta">
-                                <span class="tc-activity-user">${window.TCUtils.escapeHtml(activity.userId)}</span>
-                                <span class="tc-activity-desc">${activity.description}</span>
+                ${activities.map(activity => {
+                    const isUpdate = activity.type === 'task_updated';
+                    return `
+                        <div class="tc-activity-item ${isUpdate ? 'tc-activity-update' : ''}" data-activity-id="${activity.id}">
+                            <div class="tc-activity-icon">${typeIcons[activity.type] || '📌'}</div>
+                            <div class="tc-activity-body">
+                                <div class="tc-activity-meta">
+                                    <span class="tc-activity-user">${window.TCUtils.escapeHtml(activity.userId)}</span>
+                                    <span class="tc-activity-desc">${window.TCUtils.escapeHtml(activity.description)}</span>
+                                </div>
+                                ${activity.before !== undefined && activity.after !== undefined ? `
+                                    <div class="tc-activity-detail">
+                                        <span class="tc-activity-before">${window.TCUtils.escapeHtml(String(activity.before))}</span>
+                                        <span class="tc-activity-arrow">→</span>
+                                        <span class="tc-activity-after">${window.TCUtils.escapeHtml(String(activity.after))}</span>
+                                    </div>
+                                ` : ''}
+                                <div class="tc-activity-time">${window.TCUtils.formatRelativeTime(activity.timestamp)}</div>
                             </div>
-                            <div class="tc-activity-time">${window.TCUtils.formatRelativeTime(activity.timestamp)}</div>
                         </div>
-                    </div>
-                `).join('')}
+                    `;
+                }).join('')}
             </div>
         `;
     }
@@ -11176,7 +11322,8 @@ window.TCActivityView = ActivityView;
                 this.eventBus,
                 this.importExportService,
                 this.notificationService,
-                this.taskService
+                this.taskService,
+                this.storage
             );
 
             // 创建任务看板
