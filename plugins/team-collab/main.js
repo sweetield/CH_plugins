@@ -1298,10 +1298,9 @@ class StorageAdapter {
         const legacyKeys = this.getLegacyKeys();
         await this.saveSharedBoth(keys.project(project.id), legacyKeys.project(project.id), project, true);
 
-        // 同时保存到服务器端共享存储（使用群组 scope）
-        // 每个项目对应一个群组，使用项目 ID 作为群组 ID
-        const scope = `group:${project.id}`;
-        await this.saveToServerShared(`project:${project.id}`, project, scope);
+        // 同时保存到服务器端共享存储（使用 global scope）
+        // 项目数据使用全局 scope，访问控制由插件层面的项目成员检查处理
+        await this.saveToServerShared(`project:${project.id}`, project, 'global');
     }
 
     /**
@@ -1310,9 +1309,8 @@ class StorageAdapter {
      * @returns {Promise<Object|null>}
      */
     async loadProject(projectId) {
-        // 首先尝试从服务器端共享存储加载（使用群组 scope）
-        const scope = `group:${projectId}`;
-        const serverData = await this.loadFromServerShared(`project:${projectId}`, scope);
+        // 首先尝试从服务器端共享存储加载（使用 global scope）
+        const serverData = await this.loadFromServerShared(`project:${projectId}`, 'global');
         if (serverData) {
             console.log('[StorageAdapter] 从服务器加载项目:', projectId);
             return serverData;
