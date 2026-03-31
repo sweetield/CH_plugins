@@ -1330,6 +1330,9 @@ class StorageAdapter {
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
         await this.saveSharedBoth(keys.task(task.id), legacyKeys.task(task.id), task, true);
+
+        // 同步到服务器端共享存储（确保所有项目成员可访问）
+        await this.saveToServerShared(`task:${task.id}`, task, 'global');
     }
 
     /**
@@ -1338,6 +1341,13 @@ class StorageAdapter {
      * @returns {Promise<Object|null>}
      */
     async loadTask(taskId) {
+        // 首先尝试从服务器端共享存储加载
+        const serverData = await this.loadFromServerShared(`task:${taskId}`, 'global');
+        if (serverData) {
+            return serverData;
+        }
+
+        // 回退到本地存储
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
         return await this.loadSharedWithFallback(keys.task(taskId), legacyKeys.task(taskId), true);
@@ -1350,6 +1360,9 @@ class StorageAdapter {
     async savePlan(plan) {
         const keys = this.getKeys();
         await this.saveEncrypted(keys.plan(plan.id), plan);
+
+        // 同步到服务器端共享存储
+        await this.saveToServerShared(`plan:${plan.id}`, plan, 'global');
     }
 
     /**
@@ -1358,6 +1371,13 @@ class StorageAdapter {
      * @returns {Promise<Object|null>}
      */
     async loadPlan(planId) {
+        // 首先尝试从服务器端共享存储加载
+        const serverData = await this.loadFromServerShared(`plan:${planId}`, 'global');
+        if (serverData) {
+            return serverData;
+        }
+
+        // 回退到本地存储
         const keys = this.getKeys();
         return await this.loadEncrypted(keys.plan(planId));
     }
@@ -1369,6 +1389,9 @@ class StorageAdapter {
     async saveThread(thread) {
         const keys = this.getKeys();
         await this.saveEncrypted(keys.thread(thread.id), thread);
+
+        // 同步到服务器端共享存储
+        await this.saveToServerShared(`thread:${thread.id}`, thread, 'global');
     }
 
     /**
@@ -1377,8 +1400,49 @@ class StorageAdapter {
      * @returns {Promise<Object|null>}
      */
     async loadThread(threadId) {
+        // 首先尝试从服务器端共享存储加载
+        const serverData = await this.loadFromServerShared(`thread:${threadId}`, 'global');
+        if (serverData) {
+            return serverData;
+        }
+
+        // 回退到本地存储
         const keys = this.getKeys();
         return await this.loadEncrypted(keys.thread(threadId));
+    }
+
+    /**
+     * 保存线程评论（分页）
+     * @param {string} threadId - 线程 ID
+     * @param {number} page - 页码
+     * @param {Array} comments - 评论列表
+     */
+    async saveThreadComments(threadId, page, comments) {
+        const keys = this.getKeys();
+        const commentsKey = keys.threadComments(threadId, page);
+        await this.save(commentsKey, comments);
+
+        // 同步到服务器端共享存储
+        await this.saveToServerShared(`thread-comments:${threadId}:${page}`, comments, 'global');
+    }
+
+    /**
+     * 读取线程评论（分页）
+     * @param {string} threadId - 线程 ID
+     * @param {number} page - 页码
+     * @returns {Promise<Array>}
+     */
+    async loadThreadComments(threadId, page) {
+        // 首先尝试从服务器端共享存储加载
+        const serverData = await this.loadFromServerShared(`thread-comments:${threadId}:${page}`, 'global');
+        if (serverData !== null && serverData !== undefined) {
+            return serverData;
+        }
+
+        // 回退到本地存储
+        const keys = this.getKeys();
+        const commentsKey = keys.threadComments(threadId, page);
+        return await this.load(commentsKey) || [];
     }
 
     /**
@@ -1452,6 +1516,9 @@ class StorageAdapter {
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
         await this.saveSharedBoth(keys.projectTaskIndex(projectId), legacyKeys.projectTaskIndex(projectId), taskIds, false);
+
+        // 同步到服务器端共享存储
+        await this.saveToServerShared(`project-task-index:${projectId}`, taskIds, 'global');
     }
 
     /**
@@ -1460,6 +1527,13 @@ class StorageAdapter {
      * @returns {Promise<Array>}
      */
     async loadProjectTaskIndex(projectId) {
+        // 首先尝试从服务器端共享存储加载
+        const serverData = await this.loadFromServerShared(`project-task-index:${projectId}`, 'global');
+        if (serverData !== null && serverData !== undefined) {
+            return serverData;
+        }
+
+        // 回退到本地存储
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
         return await this.loadSharedWithFallback(keys.projectTaskIndex(projectId), legacyKeys.projectTaskIndex(projectId), false, []);
@@ -1475,6 +1549,9 @@ class StorageAdapter {
         const legacyKeys = this.getLegacyKeys();
         await this.save(keys.projectPlanIndex(projectId), planIds);
         await this.save(legacyKeys.projectPlanIndex(projectId), planIds);
+
+        // 同步到服务器端共享存储
+        await this.saveToServerShared(`project-plan-index:${projectId}`, planIds, 'global');
     }
 
     /**
@@ -1483,6 +1560,13 @@ class StorageAdapter {
      * @returns {Promise<Array>}
      */
     async loadProjectPlanIndex(projectId) {
+        // 首先尝试从服务器端共享存储加载
+        const serverData = await this.loadFromServerShared(`project-plan-index:${projectId}`, 'global');
+        if (serverData !== null && serverData !== undefined) {
+            return serverData;
+        }
+
+        // 回退到本地存储
         const keys = this.getKeys();
         const legacyKeys = this.getLegacyKeys();
         return await this.loadSharedWithFallback(keys.projectPlanIndex(projectId), legacyKeys.projectPlanIndex(projectId), false, []) || [];
@@ -1858,7 +1942,7 @@ class PermissionService {
     }
 
     /**
-     * 检查用户是否可以编辑项目
+     * 检查用户是否可以编辑项目设置（名称、描述等）
      * @param {string} userId - 用户 ID
      * @param {Object} project - 项目对象
      * @returns {boolean}
@@ -1907,6 +1991,7 @@ class PermissionService {
 
     /**
      * 检查用户是否可以删除项目
+     * 仅 owner 可以删除项目
      * @param {string} userId - 用户 ID
      * @param {Object} project - 项目对象
      * @returns {boolean}
@@ -1919,6 +2004,7 @@ class PermissionService {
 
     /**
      * 检查用户是否可以创建任务
+     * owner/admin/member 可以创建，guest 不可以
      * @param {string} userId - 用户 ID
      * @param {Object} project - 项目对象
      * @returns {boolean}
@@ -1943,7 +2029,7 @@ class PermissionService {
         // owner 和 admin 可以查看所有任务
         if (['owner', 'admin'].includes(member.role)) return true;
 
-        // 根据可见性判断
+        // member 和 guest 根据可见性判断
         if (task.visibility === 'project') return true;
         if (task.visibility === 'private') {
             return [task.createdBy, ...(task.assigneeIds || [])].includes(userId);
@@ -1957,6 +2043,9 @@ class PermissionService {
 
     /**
      * 检查用户是否可以编辑任务
+     * owner/admin 可以编辑所有任务
+     * member 可以编辑自己创建或分配给自己的任务
+     * guest 不能编辑
      * @param {string} userId - 用户 ID
      * @param {Object} task - 任务对象
      * @param {Object} project - 项目对象
@@ -1969,10 +2058,11 @@ class PermissionService {
         // owner 和 admin 可以编辑所有任务
         if (['owner', 'admin'].includes(member.role)) return true;
 
-        // 创建者可以编辑自己的任务
-        if (task.createdBy === userId) return true;
+        // guest 不能编辑
+        if (member.role === 'guest') return false;
 
-        // 负责人可以编辑分配给自己的任务
+        // member 可以编辑自己创建或分配给自己的任务
+        if (task.createdBy === userId) return true;
         if (task.assigneeIds?.includes(userId)) return true;
 
         return false;
@@ -1980,6 +2070,9 @@ class PermissionService {
 
     /**
      * 检查用户是否可以删除任务
+     * owner/admin 可以删除所有任务
+     * member 可以删除自己创建的任务
+     * guest 不能删除
      * @param {string} userId - 用户 ID
      * @param {Object} task - 任务对象
      * @param {Object} project - 项目对象
@@ -1992,7 +2085,10 @@ class PermissionService {
         // owner 和 admin 可以删除任务
         if (['owner', 'admin'].includes(member.role)) return true;
 
-        // 创建者可以删除自己的任务
+        // guest 不能删除
+        if (member.role === 'guest') return false;
+
+        // member 可以删除自己创建的任务
         if (task.createdBy === userId) return true;
 
         return false;
@@ -2000,6 +2096,8 @@ class PermissionService {
 
     /**
      * 检查用户是否可以评论任务
+     * owner/admin/member 可以评论
+     * guest 只能查看不能评论
      * @param {string} userId - 用户 ID
      * @param {Object} task - 任务对象
      * @param {Object} project - 项目对象
@@ -3290,10 +3388,9 @@ class CommentService {
 
         // 保存评论（分页存储）
         const page = Math.ceil((thread.commentCount + 1) / C.PAGE_SIZE.COMMENTS);
-        const commentsKey = this.storage.getKeys().threadComments(thread.id, page);
-        let comments = await this.storage.load(commentsKey) || [];
+        let comments = await this.storage.loadThreadComments(thread.id, page);
         comments.push(comment);
-        await this.storage.save(commentsKey, comments);
+        await this.storage.saveThreadComments(thread.id, page, comments);
 
         // 更新线程
         thread.commentCount++;
@@ -3360,8 +3457,7 @@ class CommentService {
      */
     async getComments(threadId, page = 1) {
         const C = window.TCConstants;
-        const commentsKey = this.storage.getKeys().threadComments(threadId, page);
-        const comments = await this.storage.load(commentsKey) || [];
+        const comments = await this.storage.loadThreadComments(threadId, page);
 
         // 解密评论内容
         const decryptedComments = await Promise.all(
@@ -3422,8 +3518,7 @@ class CommentService {
         let targetComments = [];
 
         for (let page = 1; page <= totalPages; page++) {
-            const commentsKey = this.storage.getKeys().threadComments(threadId, page);
-            const comments = await this.storage.load(commentsKey) || [];
+            const comments = await this.storage.loadThreadComments(threadId, page);
             const found = comments.find(c => c.id === commentId);
             if (found) {
                 targetComment = found;
@@ -3449,8 +3544,7 @@ class CommentService {
         }
 
         // 保存
-        const commentsKey = this.storage.getKeys().threadComments(threadId, targetPage);
-        await this.storage.save(commentsKey, targetComments);
+        await this.storage.saveThreadComments(threadId, targetPage, targetComments);
 
         return {
             ...targetComment,
@@ -3476,8 +3570,7 @@ class CommentService {
         const totalPages = Math.ceil(thread.commentCount / C.PAGE_SIZE.COMMENTS);
 
         for (let page = 1; page <= totalPages; page++) {
-            const commentsKey = this.storage.getKeys().threadComments(threadId, page);
-            const comments = await this.storage.load(commentsKey) || [];
+            const comments = await this.storage.loadThreadComments(threadId, page);
             const index = comments.findIndex(c => c.id === commentId);
 
             if (index > -1) {
@@ -3491,7 +3584,7 @@ class CommentService {
                 comments[index].isDeleted = true;
                 comments[index].updatedAt = Date.now();
 
-                await this.storage.save(commentsKey, comments);
+                await this.storage.saveThreadComments(threadId, page, comments);
                 return;
             }
         }
@@ -5036,9 +5129,7 @@ class ImportExportService {
         const pageSize = C.PAGE_SIZE.COMMENTS;
 
         for (let page = 1; page <= 10; page++) {
-            const pageComments = await this.storage.load(
-                this.storage.getKeys().threadComments(threadId, page)
-            );
+            const pageComments = await this.storage.loadThreadComments(threadId, page);
             if (!pageComments || pageComments.length === 0) break;
             comments.push(...pageComments);
         }
