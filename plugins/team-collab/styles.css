@@ -1873,6 +1873,45 @@
     color: var(--text-secondary, #6b7280);
 }
 
+.tc-activity-detail {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    margin-top: 6px;
+    padding: 4px 8px;
+    background: var(--bg-primary, #ffffff);
+    border-radius: 4px;
+    border: 1px solid var(--border-color, #e5e7eb);
+}
+
+.tc-activity-before {
+    color: #ef4444;
+    text-decoration: line-through;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tc-activity-arrow {
+    color: var(--text-secondary, #6b7280);
+    flex-shrink: 0;
+}
+
+.tc-activity-after {
+    color: #22c55e;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tc-activity-update {
+    border-left: 3px solid var(--primary-color, #3b82f6);
+    padding-left: 9px;
+}
+
 /* ==================== 团队进度 ==================== */
 
 .tc-team-progress {
@@ -2012,6 +2051,11 @@
 .theme-dark .tc-info-row,
 .theme-dark .tc-member-item {
     border-color: var(--border-color, #374151);
+}
+
+.theme-dark .tc-activity-detail {
+    background: var(--bg-primary, #1f2937);
+    border-color: var(--border-color, #4b5563);
 }
 
 .theme-dark .tc-stat-item,
