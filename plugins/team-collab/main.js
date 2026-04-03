@@ -7021,9 +7021,8 @@ class TaskList {
                 <div class="tc-team-stats">
                     <div class="tc-stat-card"><span class="tc-stat-label">总任务</span><span class="tc-stat-value">${stats.total}</span></div>
                     <div class="tc-stat-card"><span class="tc-stat-label">进行中</span><span class="tc-stat-value">${stats.doing}</span></div>
-                    <div class="tc-stat-card"><span class="tc-stat-label">待支援</span><span class="tc-stat-value">${stats.help}</span></div>
-                    <div class="tc-stat-card"><span class="tc-stat-label">已逾期</span><span class="tc-stat-value">${stats.overdue}</span></div>
                     <div class="tc-stat-card"><span class="tc-stat-label">剩余</span><span class="tc-stat-value">${stats.remaining}</span></div>
+                    <div class="tc-stat-card"><span class="tc-stat-label">已逾期</span><span class="tc-stat-value">${stats.overdue}</span></div>
                 </div>
 
                 <div class="tc-list-filters tc-team-filters">
