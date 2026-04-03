@@ -9251,8 +9251,8 @@ class PlanView {
         try {
             this.plans = await this.planService.getProjectPlans(this.currentProjectId);
             // 检查学习计划到期提醒
-            if (this.currentUserId && this.plans.length > 0) {
-                await this.planService.checkPlanDueReminders(this.currentUserId, this.plans);
+            if (this.currentUserId && this.plans.length > 0 && this.notificationService) {
+                await this.notificationService.checkPlanDueReminders(this.currentUserId, this.plans);
             }
         } catch (error) {
             console.error('[PlanView] 加载计划失败:', error);
