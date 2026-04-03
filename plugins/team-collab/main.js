@@ -399,8 +399,93 @@ function formatDateTime(timestamp) {
         day: '2-digit',
         hour: '2-digit',
         minute: '2-digit'
-    });
-}
+            });
+        }
+
+        /**
+         * 显示编辑项目对话框
+         */
+        async showEditProjectModal(projectId) {
+            const project = await this.projectService.getProject(projectId);
+            if (!project) {
+                this.panel.api.ui.showToast('项目不存在', 'error');
+                return;
+            }
+
+            const members = project.members || [];
+            const membersOptions = members
+                .filter(m => m.userId !== project.ownerId)
+                .map(m => `<option value="${window.TCUtils.escapeHtml(m.userId)}" ${m.userId === project.ownerId ? 'selected' : ''}>${window.TCUtils.escapeHtml(m.userId)} (${this.getRoleLabelForProject(m.role)})</option>`)
+                .join('');
+
+            const modalHtml = `
+                <div class="tc-modal-overlay" id="tc-edit-project-modal">
+                    <div class="tc-modal">
+                        <div class="tc-modal-header">
+                            <h3>编辑项目 - ${window.TCUtils.escapeHtml(project.name)}</h3>
+                            <button class="tc-modal-close" id="tc-close-edit-project">&times;</button>
+                        </div>
+                        <div class="tc-modal-body">
+                            <div class="tc-form-group">
+                                <label class="tc-form-label">项目名称</label>
+                                <input type="text" class="tc-form-input" id="tc-edit-project-name" value="${window.TCUtils.escapeHtml(project.name)}">
+                            </div>
+                            <div class="tc-form-group">
+                                <label class="tc-form-label">项目描述</label>
+                                <textarea class="tc-form-input tc-form-textarea" id="tc-edit-project-desc" rows="3">${window.TCUtils.escapeHtml(project.description || '')}</textarea>
+                            </div>
+                            <div class="tc-form-group">
+                                <label class="tc-form-label">项目负责人</label>
+                                <select class="tc-form-select" id="tc-edit-project-owner">
+                                    ${members.map(m => `<option value="${window.TCUtils.escapeHtml(m.userId)}" ${m.userId === project.ownerId ? 'selected' : ''}>${window.TCUtils.escapeHtml(m.userId)} (${this.getRoleLabelForProject(m.role)})</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="tc-modal-footer">
+                            <button class="tc-btn tc-btn-secondary" id="tc-cancel-edit-project">取消</button>
+                            <button class="tc-btn tc-btn-primary" id="tc-save-edit-project">保存</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            const modal = document.getElementById('tc-edit-project-modal');
+            const closeModal = () => modal.remove();
+            document.getElementById('tc-close-edit-project').addEventListener('click', closeModal);
+            document.getElementById('tc-cancel-edit-project').addEventListener('click', closeModal);
+            modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+            document.getElementById('tc-save-edit-project').addEventListener('click', async () => {
+                const name = document.getElementById('tc-edit-project-name').value.trim();
+                const description = document.getElementById('tc-edit-project-desc').value.trim();
+                const ownerId = document.getElementById('tc-edit-project-owner').value;
+
+                if (!name) {
+                    this.panel.api.ui.showToast('项目名称不能为空', 'warning');
+                    return;
+                }
+
+                try {
+                    const updates = { name, description };
+                    if (ownerId !== project.ownerId) {
+                        updates.ownerId = ownerId;
+                    }
+                    await this.projectService.updateProject(projectId, updates, this.currentUserId);
+                    this.panel.api.showToast('项目已更新', 'success');
+                    closeModal();
+                    await this.showMyParticipationView();
+                } catch (error) {
+                    this.panel.api.ui.showToast('更新失败: ' + error.message, 'error');
+                }
+            });
+        }
+
+        getRoleLabelForProject(role) {
+            const labels = { 'owner': '创建者', 'admin': '管理员', 'member': '成员', 'guest': '访客' };
+            return labels[role] || '未知';
+        }
 
 /**
  * 格式化相对时间
@@ -9327,45 +9412,40 @@ class PlanView {
         const remainingPlans = totalPlans - completedPlans;
 
         const html = `
-            <div class="tc-plan-view">
-                <div class="tc-plan-header">
-                    <div class="tc-plan-title">学习计划</div>
-                    <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-add-plan-btn">
-                        + 创建计划
-                    </button>
-                </div>
-                <div class="tc-plan-stats">
-                    <div class="tc-stat-item">
-                        <span class="tc-stat-value">${totalPlans}</span>
-                        <span class="tc-stat-label">总计划数</span>
+            <div class="tc-plan-view tc-team-list-view">
+                <div class="tc-list-header">
+                    <div>
+                        <div class="tc-list-title">学习计划</div>
+                        <div class="tc-list-subtitle">创建学习计划，帮助团队成员系统学习和成长。</div>
                     </div>
-                    <div class="tc-stat-item tc-stat-completed">
-                        <span class="tc-stat-value">${completedPlans}</span>
-                        <span class="tc-stat-label">已完成</span>
-                    </div>
-                    <div class="tc-stat-item tc-stat-remaining">
-                        <span class="tc-stat-value">${remainingPlans}</span>
-                        <span class="tc-stat-label">剩余/进行中</span>
+                    <div class="tc-list-actions">
+                        <button class="tc-btn tc-btn-primary tc-btn-sm" id="tc-add-plan-btn">+ 创建计划</button>
                     </div>
                 </div>
-                <div class="tc-plan-filters">
-                    <div class="tc-filter-row">
-                        <input type="text" class="tc-form-input tc-search-input" id="tc-plan-search" 
-                               placeholder="搜索计划标题..." value="${window.TCUtils.escapeHtml(this.searchKeyword)}">
-                        <select class="tc-form-select tc-status-filter" id="tc-plan-status-filter">
-                            <option value="all" ${this.statusFilter === 'all' ? 'selected' : ''}>全部状态</option>
-                            <option value="not_started" ${this.statusFilter === 'not_started' ? 'selected' : ''}>未开始</option>
-                            <option value="in_progress" ${this.statusFilter === 'in_progress' ? 'selected' : ''}>进行中</option>
-                            <option value="completed" ${this.statusFilter === 'completed' ? 'selected' : ''}>已完成</option>
-                            <option value="approved" ${this.statusFilter === 'approved' ? 'selected' : ''}>已审批</option>
-                            <option value="overdue" ${this.statusFilter === 'overdue' ? 'selected' : ''}>已逾期</option>
-                        </select>
-                    </div>
-                    <div class="tc-tag-filters" id="tc-plan-tag-filters">
-                        ${this.renderTagFilterButtons()}
+
+                <div class="tc-team-stats">
+                    <div class="tc-stat-card"><span class="tc-stat-label">总计划</span><span class="tc-stat-value">${totalPlans}</span></div>
+                    <div class="tc-stat-card"><span class="tc-stat-label">已完成</span><span class="tc-stat-value">${completedPlans}</span></div>
+                    <div class="tc-stat-card"><span class="tc-stat-label">剩余</span><span class="tc-stat-value">${remainingPlans}</span></div>
+                </div>
+
+                <div class="tc-list-filters tc-team-filters">
+                    <input type="text" class="tc-search-input" id="tc-plan-search" placeholder="搜索计划标题..." value="${window.TCUtils.escapeHtml(this.searchKeyword || '')}">
+                    <select class="tc-filter-select" id="tc-plan-status-filter">
+                        <option value="all" ${this.statusFilter === 'all' ? 'selected' : ''}>全部状态</option>
+                        <option value="not_started" ${this.statusFilter === 'not_started' ? 'selected' : ''}>未开始</option>
+                        <option value="in_progress" ${this.statusFilter === 'in_progress' ? 'selected' : ''}>进行中</option>
+                        <option value="completed" ${this.statusFilter === 'completed' ? 'selected' : ''}>已完成</option>
+                        <option value="approved" ${this.statusFilter === 'approved' ? 'selected' : ''}>已审批</option>
+                        <option value="overdue" ${this.statusFilter === 'overdue' ? 'selected' : ''}>已逾期</option>
+                    </select>
+                    <div class="tc-tag-filters">
+                        ${this.getAllPlanTags().map(tag => `<button class="tc-filter-chip ${this.tagFilter === tag ? 'active' : ''}" data-tag="${window.TCUtils.escapeHtml(tag)}">${window.TCUtils.escapeHtml(tag)}</button>`).join('')}
+                        ${this.tagFilter ? `<button class="tc-filter-chip tc-clear-tag" data-tag="">✕ 清除标签</button>` : ''}
                     </div>
                 </div>
-                <div class="tc-plan-content">
+
+                <div class="tc-list-content">
                     ${this.filteredPlans.length === 0 && this.plans.length === 0 ? this.renderEmpty() : this.renderPlanList()}
                 </div>
             </div>
@@ -9403,6 +9483,16 @@ class PlanView {
                 ${plansToShow.map(plan => this.renderPlanCard(plan)).join('')}
             </div>
         `;
+    }
+
+    getAllPlanTags() {
+        const tagSet = new Set();
+        this.plans.forEach(p => {
+            if (p.tags && Array.isArray(p.tags)) {
+                p.tags.forEach(t => tagSet.add(t));
+            }
+        });
+        return [...tagSet].sort();
     }
 
     /**
@@ -9553,9 +9643,16 @@ class PlanView {
         }
 
         // 标签筛选
-        document.querySelectorAll('#tc-plan-tag-filters .tc-tag-btn').forEach(btn => {
+        document.querySelectorAll('.tc-tag-filters .tc-filter-chip').forEach(btn => {
             btn.addEventListener('click', () => {
-                this.tagFilter = btn.dataset.tag;
+                const tag = btn.dataset.tag;
+                if (tag === '') {
+                    this.tagFilter = '';
+                } else if (this.tagFilter === tag) {
+                    this.tagFilter = '';
+                } else {
+                    this.tagFilter = tag;
+                }
                 this.applyFilters();
                 this.render();
                 this.bindEvents();
@@ -12274,6 +12371,7 @@ window.TCActivityView = ActivityView;
                                                     </div>
                                                     <div class="tc-participation-card-actions">
                                                         <button class="tc-btn tc-btn-primary tc-btn-sm tc-enter-project-btn" data-project-id="${p.id}">进入项目</button>
+                                                        <button class="tc-btn tc-btn-secondary tc-btn-sm tc-edit-project-btn" data-project-id="${p.id}">编辑</button>
                                                     </div>
                                                 </div>
                                             `;
@@ -12346,6 +12444,15 @@ window.TCActivityView = ActivityView;
                     const projectId = btn.dataset.projectId;
                     this.currentProjectId = projectId;
                     this.eventBus.emit('project.changed', { projectId });
+                });
+            });
+
+            // 绑定编辑项目按钮
+            document.querySelectorAll('.tc-edit-project-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const projectId = btn.dataset.projectId;
+                    this.showEditProjectModal(projectId);
                 });
             });
 
