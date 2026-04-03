@@ -560,13 +560,38 @@ window.TCUtils = {
 };
 
 window.TCAttachmentUtils = {
-    MAX_FILE_SIZE: 3 * 1024 * 1024, // 限制为 3MB 以确保存储正常
-    MAX_IMAGE_SIZE: 3000 * 1024, // 图片限制为 3MB以内
+    MAX_FILE_SIZE: 40 * 1024,
+    MAX_IMAGE_SIZE: 40 * 1024,
     async fileToDataUrl(file) {
         return await new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result);
             reader.onerror = () => reject(new Error(`读取文件失败: ${file?.name || ''}`));
+            reader.readAsDataURL(file);
+        });
+    },
+    compressImage(file, maxWidth = 800, quality = 0.7) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let w = img.width, h = img.height;
+                    if (w > maxWidth) {
+                        h = (maxWidth / w) * h;
+                        w = maxWidth;
+                    }
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                };
+                img.onerror = () => reject(new Error('图片加载失败'));
+                img.src = e.target.result;
+            };
+            reader.onerror = () => reject(new Error('文件读取失败'));
             reader.readAsDataURL(file);
         });
     },
@@ -584,20 +609,23 @@ window.TCAttachmentUtils = {
             
             if (file.size > maxSize) {
                 const limit = this.formatFileSize(maxSize);
-                ui?.showToast?.(`文件过大，已跳过: ${file.name}（${isImage ? '图片' : '文件'}不超过 ${limit}）`, 'warning');
+                ui?.showToast?.(`文件过大: ${file.name}（${isImage ? '图片' : '文件'}不超过 ${limit}）`, 'warning');
                 continue;
             }
             
             try {
-                const dataUrl = await this.fileToDataUrl(file);
+                let dataUrl;
+                if (isImage) {
+                    dataUrl = await this.compressImage(file);
+                } else {
+                    dataUrl = await this.fileToDataUrl(file);
+                }
                 const safeName = (file.name || '附件').replace(/]/g, '\\]').replace(/\n/g, ' ');
                 const fileSize = this.formatFileSize(file.size);
                 
                 if (isImage) {
-                    // 图片使用 Markdown 图片语法
                     items.push(`![${safeName}](${dataUrl})`);
                 } else {
-                    // 文件使用链接语法，并添加大小信息
                     items.push(`[📎 ${safeName} (${fileSize})](${dataUrl})`);
                 }
             } catch (error) {
@@ -688,6 +716,17 @@ class MarkdownRenderer {
         // 链接（[text](url)），排除图片语法
         html = html.replace(/(?<!!)\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
             const safeUrl = this.sanitizeUrl(url);
+            // 检测是否为文件类型的 data URI
+            const isFileDataUrl = safeUrl.startsWith('data:') && !safeUrl.startsWith('data:image/');
+            if (isFileDataUrl) {
+                // 提取文件名和 MIME 类型
+                const mimeMatch = safeUrl.match(/^data:([^;]+);base64,/);
+                const mimeType = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+                const fileNameMatch = text.match(/📎\s*(.+?)\s*\(/);
+                const fileName = fileNameMatch ? fileNameMatch[1] : 'download';
+                const safeFileName = fileName.replace(/"/g, '&quot;');
+                return `<a href="${safeUrl}" download="${safeFileName}" class="tc-file-link" data-filename="${safeFileName}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+            }
             return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
         });
 
@@ -7923,6 +7962,22 @@ class TaskDetail {
         if (sendBtn) {
             sendBtn.addEventListener('click', () => this.sendComment());
         }
+
+        // 文件下载链接处理
+        document.addEventListener('click', (e) => {
+            const fileLink = e.target.closest('.tc-file-link');
+            if (fileLink) {
+                e.preventDefault();
+                const href = fileLink.getAttribute('href');
+                const filename = fileLink.dataset.filename || 'download';
+                if (href && href.startsWith('data:')) {
+                    const a = document.createElement('a');
+                    a.href = href;
+                    a.download = filename;
+                    a.click();
+                }
+            }
+        });
 
         this.bindCommentDropzones('tc-comment-input');
 
