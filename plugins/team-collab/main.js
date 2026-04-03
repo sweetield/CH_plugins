@@ -4844,12 +4844,11 @@ class NotificationService {
 
             // 即将到期（3天内）
             if (timeUntilDue > 0 && timeUntilDue <= threeDaysMs && !existingDueSoon) {
-                const title = plan.title ? await this.crypto.decrypt(plan.title) : '学习计划';
                 await this.createNotification({
                     userId,
                     type: C.NOTIFICATION_TYPE.PLAN_DUE_SOON,
                     title: '学习计划即将到期',
-                    content: `学习计划 "${title}" 将在3天内到期`,
+                    content: `学习计划 "${plan.title}" 将在3天内到期`,
                     projectId: plan.projectId,
                     targetType: 'plan',
                     targetId: plan.id
@@ -4858,12 +4857,11 @@ class NotificationService {
 
             // 已逾期
             if (timeUntilDue < 0 && !existingOverdue) {
-                const title = plan.title ? await this.crypto.decrypt(plan.title) : '学习计划';
                 await this.createNotification({
                     userId,
                     type: C.NOTIFICATION_TYPE.PLAN_OVERDUE,
                     title: '学习计划已逾期',
-                    content: `学习计划 "${title}" 已逾期，请尽快完成`,
+                    content: `学习计划 "${plan.title}" 已逾期，请尽快完成`,
                     projectId: plan.projectId,
                     targetType: 'plan',
                     targetId: plan.id
