@@ -3608,7 +3608,8 @@ class CommentService {
                     projectId: input.projectId,
                     targetType: input.targetType,
                     targetId: input.targetId,
-                    mentionedBy: input.authorId
+                    mentionedBy: input.authorId,
+                    commentBody: input.body
                 });
             });
         }
@@ -4426,6 +4427,7 @@ class NotificationService {
             let content = `有人在评论中@了你`;
             let targetType = 'task';
             let targetId = data.targetId || data.threadId;
+            let commentSnippet = '';
 
             try {
                 const project = await this.storage.loadProject(data.projectId);
@@ -4440,12 +4442,21 @@ class NotificationService {
                             }
                         } catch (e) {}
                     }
+
+                    // 获取评论内容摘要
+                    if (data.commentBody) {
+                        commentSnippet = data.commentBody.substring(0, 50) + (data.commentBody.length > 50 ? '...' : '');
+                    }
+
                     content = taskTitle
-                        ? `在「${project.name}」的「${taskTitle}」评论中@了你`
-                        : `在「${project.name}」中有人在评论中@了你`;
+                        ? `在「${project.name}」的「${taskTitle}」评论中@了你：${commentSnippet || '查看留言'}`
+                        : `在「${project.name}」中有人在评论中@了你：${commentSnippet || '查看留言'}`;
                 }
             } catch (e) {
                 // 忽略错误，使用默认内容
+                if (data.commentBody) {
+                    content = `${data.mentionedBy} 在评论中@了你：${data.commentBody.substring(0, 50)}...`;
+                }
             }
 
             await this.createNotification({
@@ -9566,7 +9577,22 @@ class PlanView {
         document.querySelectorAll('.tc-reply-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const authorId = btn.dataset.authorId;
-                this.replyToAuthor(authorId);
+                const floor = btn.dataset.floor;
+                this.replyToAuthor(authorId, floor);
+            });
+        });
+
+        // 楼层跳转链接
+        document.querySelectorAll('.tc-comment-reply-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetFloor = link.dataset.targetFloor;
+                const targetEl = document.querySelector(`.tc-comment-item[data-floor="${targetFloor}"]`);
+                if (targetEl) {
+                    targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    targetEl.classList.add('tc-comment-highlight');
+                    setTimeout(() => targetEl.classList.remove('tc-comment-highlight'), 2000);
+                }
             });
         });
 
@@ -9690,26 +9716,33 @@ class PlanView {
      * @returns {string} HTML
      */
     renderComments() {
-        return this.comments.map(comment => `
-            <div class="tc-comment-item" data-comment-id="${comment.id}">
-                <div class="tc-comment-avatar">
-                    <div class="tc-avatar">${this.getInitials(comment.authorId)}</div>
-                </div>
-                <div class="tc-comment-body">
-                    <div class="tc-comment-meta">
-                        <span class="tc-comment-author">${window.TCUtils.escapeHtml(comment.authorId)}</span>
-                        <span class="tc-comment-time">${window.TCUtils.formatRelativeTime(comment.createdAt)}</span>
+        return this.comments.map((comment, index) => {
+            const floor = index + 1;
+            const replyMatch = comment.body.match(/^回复\s*#(\d+)\s*[:：\s]*/);
+            const replyTarget = replyMatch ? parseInt(replyMatch[1]) : null;
+            return `
+                <div class="tc-comment-item" data-comment-id="${comment.id}" data-floor="${floor}" id="floor-${floor}">
+                    <div class="tc-comment-avatar">
+                        <div class="tc-avatar">${this.getInitials(comment.authorId)}</div>
                     </div>
-                    <div class="tc-comment-content">${this.markdown.renderSafe(comment.body)}</div>
-                    <div class="tc-comment-actions">
-                        <button class="tc-action-btn tc-reply-btn" data-author-id="${comment.authorId}">回复</button>
-                        ${comment.authorId === this.currentUserId ? `
-                            <button class="tc-action-btn tc-delete-comment-btn" data-comment-id="${comment.id}">删除</button>
-                        ` : ''}
+                    <div class="tc-comment-body">
+                        <div class="tc-comment-meta">
+                            <span class="tc-comment-floor">#${floor}</span>
+                            <span class="tc-comment-author">${window.TCUtils.escapeHtml(comment.authorId)}</span>
+                            <span class="tc-comment-time">${window.TCUtils.formatRelativeTime(comment.createdAt)}</span>
+                            ${replyTarget ? `<a class="tc-comment-reply-link" href="#floor-${replyTarget}" data-target-floor="${replyTarget}">回复 #${replyTarget}</a>` : ''}
+                        </div>
+                        <div class="tc-comment-content">${this.markdown.renderSafe(comment.body)}</div>
+                        <div class="tc-comment-actions">
+                            <button class="tc-action-btn tc-reply-btn" data-author-id="${comment.authorId}" data-floor="${floor}">回复</button>
+                            ${comment.authorId === this.currentUserId ? `
+                                <button class="tc-action-btn tc-delete-comment-btn" data-comment-id="${comment.id}">删除</button>
+                            ` : ''}
+                        </div>
                     </div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
     }
 
     /**
@@ -9777,11 +9810,13 @@ class PlanView {
     /**
      * 回复作者
      * @param {string} authorId - 作者 ID
+     * @param {string} floor - 楼层号（可选）
      */
-    replyToAuthor(authorId) {
+    replyToAuthor(authorId, floor) {
         const commentInput = document.getElementById('tc-plan-comment-input');
         if (commentInput) {
-            commentInput.value = `@${authorId} `;
+            const prefix = floor ? `回复 #${floor} @${authorId} ` : `@${authorId} `;
+            commentInput.value = prefix;
             commentInput.focus();
         }
     }
@@ -10060,7 +10095,7 @@ class InboxView {
                         <span class="tc-notification-time">${timeAgo}</span>
                     </div>
                     <div class="tc-notification-title">${window.TCUtils.escapeHtml(notification.title)}</div>
-                    <div class="tc-notification-content">${window.TCUtils.escapeHtml(notification.content)}</div>
+                    <div class="tc-notification-content">${window.TCUtils.escapeHtml(notification.content || '')}</div>
                 </div>
                 <div class="tc-notification-actions">
                     ${isUnread ? `
@@ -10540,6 +10575,23 @@ class ProjectSettingsView {
     }
 
     /**
+     * 验证用户是否存在
+     * @param {string} username - 用户名
+     * @returns {Promise<{exists: boolean, user: Object|null}>}
+     */
+    async validateUser(username) {
+        try {
+            const basePath = window.location.origin;
+            const response = await this.api.http.get(`${basePath}/api/plugins/validate-user?username=${encodeURIComponent(username)}`);
+            const data = JSON.parse(typeof response === 'string' ? response : await response.text());
+            return { exists: data.exists, user: data.user || null };
+        } catch (error) {
+            console.error('[ProjectSettings] 验证用户失败:', error);
+            return { exists: false, user: null };
+        }
+    }
+
+    /**
      * 绑定事件
      */
     bindEvents() {
@@ -10553,6 +10605,13 @@ class ProjectSettingsView {
 
                 if (!username) {
                     this.api.ui.showToast('请输入用户名', 'warning');
+                    return;
+                }
+
+                // 验证用户是否存在
+                const validation = await this.validateUser(username);
+                if (!validation.exists) {
+                    this.api.ui.showToast('用户不存在，无法添加', 'warning');
                     return;
                 }
 
@@ -10572,6 +10631,12 @@ class ProjectSettingsView {
             btn.addEventListener('click', async () => {
                 const username = btn.dataset.userid;
                 try {
+                    // 验证用户是否存在
+                    const validation = await this.validateUser(username);
+                    if (!validation.exists) {
+                        this.api.ui.showToast(`用户 ${username} 不存在，无法添加`, 'warning');
+                        return;
+                    }
                     await this.projectService.inviteMember(this.currentProjectId, username, this.currentUserId, 'member');
                     await this.rememberContact(username);
                     await this.refresh();
