@@ -10583,7 +10583,10 @@ class ProjectSettingsView {
         try {
             const basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
             const response = await this.api.http.get(`${basePath}/api/plugins/validate-user?username=${encodeURIComponent(username)}`);
-            const data = JSON.parse(typeof response === 'string' ? response : await response.text());
+            const text = typeof response === 'string' ? response : await response.text();
+            console.log('[ProjectSettings] validateUser raw response:', text);
+            const data = JSON.parse(text);
+            console.log('[ProjectSettings] validateUser parsed:', data);
             return { exists: data.exists, user: data.user || null };
         } catch (error) {
             console.error('[ProjectSettings] 验证用户失败:', error);
