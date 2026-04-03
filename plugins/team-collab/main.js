@@ -10581,7 +10581,7 @@ class ProjectSettingsView {
      */
     async validateUser(username) {
         try {
-            const basePath = window.location.origin;
+            const basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
             const response = await this.api.http.get(`${basePath}/api/plugins/validate-user?username=${encodeURIComponent(username)}`);
             const data = JSON.parse(typeof response === 'string' ? response : await response.text());
             return { exists: data.exists, user: data.user || null };
