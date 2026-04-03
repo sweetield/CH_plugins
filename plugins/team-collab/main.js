@@ -1189,8 +1189,7 @@ class StorageAdapter {
             await this.api.storage.setShared(key, data, scope);
             console.log('[StorageAdapter] 保存到服务器共享存储成功:', key, scope);
         } catch (error) {
-            console.error('[StorageAdapter] 保存到服务器共享存储失败:', error);
-            throw error;
+            console.warn('[StorageAdapter] 保存到服务器共享存储失败（不影响本地存储）:', key, error.message);
         }
     }
 
