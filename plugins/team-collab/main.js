@@ -560,8 +560,8 @@ window.TCUtils = {
 };
 
 window.TCAttachmentUtils = {
-    MAX_FILE_SIZE: 50 * 1024 * 1024,
-    MAX_IMAGE_SIZE: 50 * 1024 * 1024,
+    MAX_FILE_SIZE: 10 * 1024 * 1024,
+    MAX_IMAGE_SIZE: 10 * 1024 * 1024,
     async fileToDataUrl(file) {
         return await new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -746,7 +746,7 @@ class MarkdownRenderer {
                 const fileNameMatch = text.match(/📎\s*(.+?)\s*\(/);
                 const fileName = fileNameMatch ? fileNameMatch[1] : 'download';
                 const safeFileName = fileName.replace(/"/g, '&quot;');
-                return `<a href="${fileUrl}" download="${safeFileName}" class="tc-file-link" data-filename="${safeFileName}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+                return `<a href="${fileUrl}" class="tc-file-link" data-filename="${safeFileName}" data-file-id="${fileId}">${text}</a>`;
             }
             // 检测是否为文件类型的 data URI
             const isFileDataUrl = safeUrl.startsWith('data:') && !safeUrl.startsWith('data:image/');
@@ -8004,7 +8004,20 @@ class TaskDetail {
                 e.preventDefault();
                 const href = fileLink.getAttribute('href');
                 const filename = fileLink.dataset.filename || 'download';
-                if (href && href.startsWith('data:')) {
+                const fileId = fileLink.dataset.fileId;
+                
+                if (fileId) {
+                    // 网盘文件：创建临时 a 标签触发下载
+                    const basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
+                    const downloadUrl = `${basePath}/api/plugins/download-file/${fileId}`;
+                    const a = document.createElement('a');
+                    a.href = downloadUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                } else if (href && href.startsWith('data:')) {
+                    // data URI 文件
                     const a = document.createElement('a');
                     a.href = href;
                     a.download = filename;
