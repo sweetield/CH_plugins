@@ -2482,6 +2482,21 @@ class ProjectService {
             project.defaultTaskVisibility = updates.visibility;
         }
 
+        if (updates.ownerId !== undefined) {
+            const newOwnerId = updates.ownerId;
+            const newOwnerMember = project.members.find(m => m.userId === newOwnerId);
+            if (!newOwnerMember) {
+                throw new TCErrors.TCError('新负责人必须是项目成员', 'INVALID_INPUT');
+            }
+            // 原负责人降级为管理员
+            const oldOwnerMember = project.members.find(m => m.userId === project.ownerId);
+            if (oldOwnerMember && oldOwnerMember.userId !== newOwnerId) {
+                oldOwnerMember.role = C.PROJECT_ROLE.ADMIN;
+            }
+            newOwnerMember.role = C.PROJECT_ROLE.OWNER;
+            project.ownerId = newOwnerId;
+        }
+
         project.updatedAt = now;
         project.version = (project.version || 1) + 1;
 
@@ -4504,7 +4519,7 @@ class NotificationService {
             let commentSnippet = '';
 
             try {
-                const project = await this.storage.loadProject(data.projectId);
+                const project = await this.projectService.getProject(data.projectId);
                 if (project) {
                     // 尝试获取任务标题
                     let taskTitle = '';
@@ -4551,7 +4566,7 @@ class NotificationService {
                 userId: data.createdBy || data.userId,
                 type: C.NOTIFICATION_TYPE.PLAN_SUBMISSION,
                 title: '有新的学习成果提交',
-                content: `成员提交了学习成果`,
+                content: `${data.submittedBy || '成员'} 提交了学习成果`,
                 projectId: data.projectId,
                 targetType: 'plan',
                 targetId: data.planId
@@ -4564,7 +4579,7 @@ class NotificationService {
                 userId: data.userId,
                 type: C.NOTIFICATION_TYPE.PROJECT_INVITED,
                 title: '你已加入新项目',
-                content: `你已成功加入项目`,
+                content: `${data.invitedBy || '管理员'} 邀请你加入了项目`,
                 projectId: data.projectId,
                 targetType: 'project',
                 targetId: data.projectId
@@ -4578,8 +4593,8 @@ class NotificationService {
                 await this.createNotification({
                     userId,
                     type: C.NOTIFICATION_TYPE.HELP_REQUESTED,
-                    title: '有成员发起了协作求助',
-                    content: data.taskTitle || '有任务需要支援',
+                    title: '协作求助',
+                    content: `${data.requestedBy || '成员'} 在任务「${data.taskTitle || '未命名任务'}」中发起了协作求助，请求支援`,
                     projectId: data.projectId,
                     targetType: 'task',
                     targetId: data.taskId
@@ -4594,8 +4609,8 @@ class NotificationService {
                 await this.createNotification({
                     userId,
                     type: C.NOTIFICATION_TYPE.HELP_CLAIMED,
-                    title: '求助已有人响应',
-                    content: data.taskTitle || '求助任务已被认领',
+                    title: '已响应求助',
+                    content: `${data.helperId || '成员'} 响应了「${data.taskTitle || '未命名任务'}」的协作求助`,
                     projectId: data.projectId,
                     targetType: 'task',
                     targetId: data.taskId
@@ -4609,8 +4624,8 @@ class NotificationService {
                 await this.createNotification({
                     userId,
                     type: C.NOTIFICATION_TYPE.HELP_RESOLVED,
-                    title: '协作求助已解决',
-                    content: data.taskTitle || '求助任务已标记解决',
+                    title: '求助已解决',
+                    content: `${data.resolvedBy || '成员'} 将「${data.taskTitle || '未命名任务'}」标记为已解决`,
                     projectId: data.projectId,
                     targetType: 'task',
                     targetId: data.taskId
@@ -6932,6 +6947,10 @@ class TaskList {
             );
         }
 
+        if (this.filters.tag) {
+            filtered = filtered.filter(t => (t.tags || []).includes(this.filters.tag));
+        }
+
         if (this.filters.helpOnly) {
             filtered = filtered.filter(t => t.helpRequested || (t.helpStatus && t.helpStatus !== 'none'));
         }
@@ -6963,14 +6982,22 @@ class TaskList {
         this.tasks = filtered;
     }
 
+    getAllTags() {
+        const tagSet = new Set();
+        this.allTasks.forEach(t => (t.tags || []).forEach(tag => tagSet.add(tag)));
+        return [...tagSet].sort();
+    }
+
     getStats() {
         const now = Date.now();
+        const doneCount = this.allTasks.filter(t => t.status === 'done').length;
         return {
             total: this.allTasks.length,
             doing: this.allTasks.filter(t => t.status === 'doing').length,
             review: this.allTasks.filter(t => t.status === 'review').length,
             help: this.allTasks.filter(t => t.helpRequested || (t.helpStatus && t.helpStatus !== 'none')).length,
-            overdue: this.allTasks.filter(t => t.dueDate && t.dueDate < now && t.status !== 'done').length
+            overdue: this.allTasks.filter(t => t.dueDate && t.dueDate < now && t.status !== 'done').length,
+            remaining: this.allTasks.length - doneCount
         };
     }
 
@@ -6996,6 +7023,7 @@ class TaskList {
                     <div class="tc-stat-card"><span class="tc-stat-label">进行中</span><span class="tc-stat-value">${stats.doing}</span></div>
                     <div class="tc-stat-card"><span class="tc-stat-label">待支援</span><span class="tc-stat-value">${stats.help}</span></div>
                     <div class="tc-stat-card"><span class="tc-stat-label">已逾期</span><span class="tc-stat-value">${stats.overdue}</span></div>
+                    <div class="tc-stat-card"><span class="tc-stat-label">剩余</span><span class="tc-stat-value">${stats.remaining}</span></div>
                 </div>
 
                 <div class="tc-list-filters tc-team-filters">
@@ -7014,6 +7042,10 @@ class TaskList {
                         <option value="${C.TASK_PRIORITY.MEDIUM}" ${this.filters.priority === C.TASK_PRIORITY.MEDIUM ? 'selected' : ''}>中</option>
                         <option value="${C.TASK_PRIORITY.LOW}" ${this.filters.priority === C.TASK_PRIORITY.LOW ? 'selected' : ''}>低</option>
                     </select>
+                    <div class="tc-tag-filters">
+                        ${this.getAllTags().map(tag => `<button class="tc-filter-chip ${this.filters.tag === tag ? 'active' : ''}" data-tag="${window.TCUtils.escapeHtml(tag)}">${window.TCUtils.escapeHtml(tag)}</button>`).join('')}
+                        ${this.filters.tag ? `<button class="tc-filter-chip tc-clear-tag" data-tag="">✕ 清除标签</button>` : ''}
+                    </div>
                     <button class="tc-filter-chip ${this.filters.mineOnly ? 'active' : ''}" id="tc-filter-mine">我的任务</button>
                     <button class="tc-filter-chip ${this.filters.helpOnly ? 'active' : ''}" id="tc-filter-help">仅看待支援</button>
                 </div>
@@ -7174,6 +7206,23 @@ class TaskList {
                 this.bindEvents();
             });
         }
+
+        // 标签筛选
+        document.querySelectorAll('.tc-tag-filters .tc-filter-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tag = btn.dataset.tag;
+                if (tag === '') {
+                    this.filters.tag = '';
+                } else if (this.filters.tag === tag) {
+                    this.filters.tag = '';
+                } else {
+                    this.filters.tag = tag;
+                }
+                this.applyFilters();
+                this.render();
+                this.bindEvents();
+            });
+        });
 
         document.querySelectorAll('.tc-list-item').forEach(item => {
             item.addEventListener('click', () => {
@@ -9211,6 +9260,10 @@ class PlanView {
         this.plans = [];
         this.projectMembers = [];
         this.comments = [];
+        this.filteredPlans = [];
+        this.searchKeyword = '';
+        this.statusFilter = 'all';
+        this.tagFilter = '';
     }
 
     /**
@@ -9266,6 +9319,14 @@ class PlanView {
      * 渲染视图
      */
     render() {
+        const allPlans = this.plans;
+        const totalPlans = allPlans.length;
+        const completedPlans = allPlans.filter(p => {
+            const myProgress = p.progress[this.currentUserId];
+            return myProgress && (myProgress.status === 'completed' || myProgress.status === 'approved');
+        }).length;
+        const remainingPlans = totalPlans - completedPlans;
+
         const html = `
             <div class="tc-plan-view">
                 <div class="tc-plan-header">
@@ -9274,8 +9335,39 @@ class PlanView {
                         + 创建计划
                     </button>
                 </div>
+                <div class="tc-plan-stats">
+                    <div class="tc-stat-item">
+                        <span class="tc-stat-value">${totalPlans}</span>
+                        <span class="tc-stat-label">总计划数</span>
+                    </div>
+                    <div class="tc-stat-item tc-stat-completed">
+                        <span class="tc-stat-value">${completedPlans}</span>
+                        <span class="tc-stat-label">已完成</span>
+                    </div>
+                    <div class="tc-stat-item tc-stat-remaining">
+                        <span class="tc-stat-value">${remainingPlans}</span>
+                        <span class="tc-stat-label">剩余/进行中</span>
+                    </div>
+                </div>
+                <div class="tc-plan-filters">
+                    <div class="tc-filter-row">
+                        <input type="text" class="tc-form-input tc-search-input" id="tc-plan-search" 
+                               placeholder="搜索计划标题..." value="${window.TCUtils.escapeHtml(this.searchKeyword)}">
+                        <select class="tc-form-select tc-status-filter" id="tc-plan-status-filter">
+                            <option value="all" ${this.statusFilter === 'all' ? 'selected' : ''}>全部状态</option>
+                            <option value="not_started" ${this.statusFilter === 'not_started' ? 'selected' : ''}>未开始</option>
+                            <option value="in_progress" ${this.statusFilter === 'in_progress' ? 'selected' : ''}>进行中</option>
+                            <option value="completed" ${this.statusFilter === 'completed' ? 'selected' : ''}>已完成</option>
+                            <option value="approved" ${this.statusFilter === 'approved' ? 'selected' : ''}>已审批</option>
+                            <option value="overdue" ${this.statusFilter === 'overdue' ? 'selected' : ''}>已逾期</option>
+                        </select>
+                    </div>
+                    <div class="tc-tag-filters" id="tc-plan-tag-filters">
+                        ${this.renderTagFilterButtons()}
+                    </div>
+                </div>
                 <div class="tc-plan-content">
-                    ${this.plans.length === 0 ? this.renderEmpty() : this.renderPlanList()}
+                    ${this.filteredPlans.length === 0 && this.plans.length === 0 ? this.renderEmpty() : this.renderPlanList()}
                 </div>
             </div>
         `;
@@ -9301,11 +9393,69 @@ class PlanView {
      * 渲染计划列表
      */
     renderPlanList() {
+        const plansToShow = this.filteredPlans.length > 0 || this.searchKeyword || this.statusFilter !== 'all' || this.tagFilter
+            ? this.filteredPlans
+            : this.plans;
+        if (plansToShow.length === 0) {
+            return `<div class="tc-plan-empty"><div class="tc-empty-icon">🔍</div><div class="tc-empty-title">没有找到匹配的计划</div><div class="tc-empty-text">尝试调整搜索或筛选条件</div></div>`;
+        }
         return `
             <div class="tc-plan-list">
-                ${this.plans.map(plan => this.renderPlanCard(plan)).join('')}
+                ${plansToShow.map(plan => this.renderPlanCard(plan)).join('')}
             </div>
         `;
+    }
+
+    /**
+     * 渲染标签筛选按钮
+     */
+    renderTagFilterButtons() {
+        const allTags = new Set();
+        this.plans.forEach(p => {
+            if (p.tags && Array.isArray(p.tags)) {
+                p.tags.forEach(t => allTags.add(t));
+            }
+        });
+        if (allTags.size === 0) return '';
+        return `
+            <button class="tc-tag-btn ${!this.tagFilter ? 'active' : ''}" data-tag="">全部</button>
+            ${Array.from(allTags).map(tag => `
+                <button class="tc-tag-btn ${this.tagFilter === tag ? 'active' : ''}" data-tag="${window.TCUtils.escapeHtml(tag)}">${window.TCUtils.escapeHtml(tag)}</button>
+            `).join('')}
+        `;
+    }
+
+    /**
+     * 应用筛选条件
+     */
+    applyFilters() {
+        this.filteredPlans = this.plans.filter(plan => {
+            // 关键词搜索
+            if (this.searchKeyword) {
+                const keyword = this.searchKeyword.toLowerCase();
+                if (!plan.title.toLowerCase().includes(keyword)) return false;
+            }
+
+            // 状态筛选
+            if (this.statusFilter !== 'all') {
+                const myProgress = plan.progress[this.currentUserId];
+                const status = myProgress ? myProgress.status : 'not_started';
+                const isOverdue = plan.submissionRule.dueDate && plan.submissionRule.dueDate < Date.now() && status !== 'completed' && status !== 'approved';
+
+                if (this.statusFilter === 'overdue') {
+                    if (!isOverdue) return false;
+                } else {
+                    if (status !== this.statusFilter) return false;
+                }
+            }
+
+            // 标签筛选
+            if (this.tagFilter) {
+                if (!plan.tags || !plan.tags.includes(this.tagFilter)) return false;
+            }
+
+            return true;
+        });
     }
 
     /**
@@ -9328,6 +9478,12 @@ class PlanView {
             ? Math.round((myProgress.completedTasks / myProgress.totalTasks) * 100)
             : 0;
 
+        const tagsHtml = (plan.tags && plan.tags.length > 0) ? `
+            <div class="tc-plan-tags">
+                ${plan.tags.map(tag => `<span class="tc-tag">${window.TCUtils.escapeHtml(tag)}</span>`).join('')}
+            </div>
+        ` : '';
+
         return `
             <div class="tc-plan-card" data-plan-id="${plan.id}">
                 <div class="tc-plan-card-header">
@@ -9336,6 +9492,7 @@ class PlanView {
                         ${isOverdue ? '❗' : '📅'} ${dueDateText}
                     </div>
                 </div>
+                ${tagsHtml}
                 ${plan.description ? `
                     <div class="tc-plan-card-desc">${window.TCUtils.escapeHtml(window.TCUtils.truncateText(plan.description, 80))}</div>
                 ` : ''}
@@ -9352,9 +9509,10 @@ class PlanView {
                     <div class="tc-plan-members">
                         👥 ${plan.assigneeIds.length} 成员 · ☑ ${(plan.checklist || []).length} 清单项
                     </div>
-                    <button class="tc-btn tc-btn-secondary tc-btn-sm tc-view-plan-btn" data-plan-id="${plan.id}">
-                        查看详情
-                    </button>
+                    <div class="tc-plan-card-actions">
+                        <button class="tc-btn tc-btn-secondary tc-btn-sm tc-edit-plan-btn" data-plan-id="${plan.id}">编辑</button>
+                        <button class="tc-btn tc-btn-secondary tc-btn-sm tc-view-plan-btn" data-plan-id="${plan.id}">查看详情</button>
+                    </div>
                 </div>
             </div>
         `;
@@ -9369,6 +9527,42 @@ class PlanView {
             btn.addEventListener('click', () => this.showCreatePlanModal());
         });
 
+        // 搜索框
+        const searchInput = document.getElementById('tc-plan-search');
+        if (searchInput) {
+            let searchTimeout;
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    this.searchKeyword = e.target.value.trim();
+                    this.applyFilters();
+                    this.render();
+                    this.bindEvents();
+                }, 300);
+            });
+        }
+
+        // 状态筛选
+        const statusFilter = document.getElementById('tc-plan-status-filter');
+        if (statusFilter) {
+            statusFilter.addEventListener('change', (e) => {
+                this.statusFilter = e.target.value;
+                this.applyFilters();
+                this.render();
+                this.bindEvents();
+            });
+        }
+
+        // 标签筛选
+        document.querySelectorAll('#tc-plan-tag-filters .tc-tag-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.tagFilter = btn.dataset.tag;
+                this.applyFilters();
+                this.render();
+                this.bindEvents();
+            });
+        });
+
         // 查看计划详情
         document.querySelectorAll('.tc-view-plan-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -9378,12 +9572,91 @@ class PlanView {
             });
         });
 
+        // 编辑计划参与人员
+        document.querySelectorAll('.tc-edit-plan-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const planId = btn.dataset.planId;
+                this.showEditPlanAssigneesModal(planId);
+            });
+        });
+
         // 点击卡片查看详情
         document.querySelectorAll('.tc-plan-card').forEach(card => {
             card.addEventListener('click', () => {
                 const planId = card.dataset.planId;
                 this.showPlanDetail(planId);
             });
+        });
+    }
+
+    /**
+     * 显示编辑计划参与人员对话框
+     */
+    async showEditPlanAssigneesModal(planId) {
+        const plan = this.plans.find(p => p.id === planId);
+        if (!plan) {
+            this.panel.api.ui.showToast('计划不存在', 'error');
+            return;
+        }
+
+        const modal = document.createElement('div');
+        modal.className = 'tc-modal open';
+
+        const memberOptions = this.projectMembers.map(m => `
+            <label class="tc-checkbox-label">
+                <input type="checkbox" class="tc-edit-assignee-checkbox" value="${m.userId}" ${(plan.assigneeIds || []).includes(m.userId) ? 'checked' : ''}>
+                <span>${m.userId}${m.userId === this.currentUserId ? ' (我)' : ''}</span>
+            </label>
+        `).join('');
+
+        modal.innerHTML = `
+            <div class="tc-modal-content">
+                <div class="tc-modal-header">
+                    <h3>编辑参与成员 - ${window.TCUtils.escapeHtml(plan.title)}</h3>
+                    <button class="tc-modal-close" id="tc-close-edit-assignees">&times;</button>
+                </div>
+                <div class="tc-modal-body">
+                    <div class="tc-form-group">
+                        <label class="tc-form-label">选择参与成员</label>
+                        <div class="tc-checkbox-group" id="tc-edit-assignee-list">
+                            ${memberOptions || '<div class="tc-placeholder">暂无项目成员</div>'}
+                        </div>
+                    </div>
+                </div>
+                <div class="tc-modal-footer">
+                    <button class="tc-btn tc-btn-secondary" id="tc-cancel-edit-assignees">取消</button>
+                    <button class="tc-btn tc-btn-primary" id="tc-save-edit-assignees">保存</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const closeModal = () => modal.remove();
+        document.getElementById('tc-close-edit-assignees').addEventListener('click', closeModal);
+        document.getElementById('tc-cancel-edit-assignees').addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+        document.getElementById('tc-save-edit-assignees').addEventListener('click', async () => {
+            const checkboxes = modal.querySelectorAll('.tc-edit-assignee-checkbox:checked');
+            const assigneeIds = Array.from(checkboxes).map(cb => cb.value);
+
+            if (assigneeIds.length === 0) {
+                this.panel.api.ui.showToast('请至少选择一个参与成员', 'warning');
+                return;
+            }
+
+            try {
+                await this.planService.updatePlan(planId, { assigneeIds }, this.currentUserId);
+                this.panel.api.ui.showToast('参与成员已更新', 'success');
+                closeModal();
+                await this.loadPlans();
+                this.render();
+                this.bindEvents();
+            } catch (error) {
+                this.panel.api.ui.showToast('更新失败: ' + error.message, 'error');
+            }
         });
     }
 
@@ -9433,6 +9706,11 @@ class PlanView {
                         <div class="tc-assignee-list" id="tc-plan-assignees">
                             ${memberOptions || '<span class="tc-placeholder">暂无成员可选</span>'}
                         </div>
+                    </div>
+                    <div class="tc-form-group">
+                        <label class="tc-form-label">标签（逗号分隔）</label>
+                        <input type="text" class="tc-form-input" id="tc-plan-tags" 
+                               placeholder="例如：前端, JavaScript, 进阶">
                     </div>
                     <div class="tc-form-group">
                         <label class="tc-form-label">交付成果（逗号分隔）</label>
@@ -9494,6 +9772,7 @@ class PlanView {
             const description = document.getElementById('tc-plan-description').value.trim();
             const objectives = document.getElementById('tc-plan-objectives').value.trim();
             const dueDate = document.getElementById('tc-plan-due-date').value;
+            const tagsStr = document.getElementById('tc-plan-tags').value.trim();
             const deliverablesStr = document.getElementById('tc-plan-deliverables').value.trim();
             const checklist = Array.from(modal.querySelectorAll('.tc-plan-checklist-input'))
                 .map(input => input.value.trim())
@@ -9513,6 +9792,9 @@ class PlanView {
             }
 
             try {
+                const tags = tagsStr
+                    ? tagsStr.split(',').map(t => t.trim()).filter(t => t)
+                    : [];
                 const deliverables = deliverablesStr
                     ? deliverablesStr.split(',').map(d => d.trim()).filter(d => d)
                     : [];
@@ -9525,7 +9807,8 @@ class PlanView {
                     dueDate: dueDate ? new Date(dueDate).getTime() : null,
                     deliverables,
                     checklist,
-                    assigneeIds: assigneeIds
+                    assigneeIds: assigneeIds,
+                    tags: tags
                 }, this.currentUserId);
 
                 this.panel.api.ui.showToast('学习计划创建成功', 'success');
@@ -10591,6 +10874,11 @@ class ProjectSettingsView {
                             <span class="tc-info-value">${project.description ? window.TCUtils.escapeHtml(project.description) : '<span class="tc-placeholder">暂无描述</span>'}</span>
                         </div>
                         <div class="tc-info-row">
+                            <span class="tc-info-label">项目创建者</span>
+                            <span class="tc-info-value">${window.TCUtils.escapeHtml(project.ownerId || '')}</span>
+                            ${canEdit ? `<button class="tc-btn tc-btn-secondary tc-btn-sm" id="tc-change-owner-btn" style="margin-left:8px;">更换负责人</button>` : ''}
+                        </div>
+                        <div class="tc-info-row">
                             <span class="tc-info-label">你的角色</span>
                             <span class="tc-info-value tc-role-badge tc-role-${memberInfo?.role || 'guest'}">${this.getRoleLabel(memberInfo?.role)}</span>
                         </div>
@@ -10866,6 +11154,76 @@ class ProjectSettingsView {
                 }
             });
         }
+
+        const changeOwnerBtn = document.getElementById('tc-change-owner-btn');
+        if (changeOwnerBtn) {
+            changeOwnerBtn.addEventListener('click', () => this.showChangeOwnerModal());
+        }
+    }
+
+    /**
+     * 显示更换负责人对话框
+     */
+    showChangeOwnerModal() {
+        const project = this.project;
+        const members = project.members || [];
+        const membersOptions = members
+            .filter(m => m.userId !== project.ownerId)
+            .map(m => `<option value="${window.TCUtils.escapeHtml(m.userId)}">${window.TCUtils.escapeHtml(m.userId)} (${this.getRoleLabel(m.role)})</option>`)
+            .join('');
+
+        const modalHtml = `
+            <div class="tc-modal-overlay" id="tc-change-owner-modal">
+                <div class="tc-modal">
+                    <div class="tc-modal-header">
+                        <h3>更换项目负责人</h3>
+                        <button class="tc-modal-close" id="tc-close-change-owner">&times;</button>
+                    </div>
+                    <div class="tc-modal-body">
+                        <p class="tc-modal-desc">当前负责人：${window.TCUtils.escapeHtml(project.ownerId)}</p>
+                        <div class="tc-form-group">
+                            <label class="tc-form-label">新负责人</label>
+                            <select class="tc-form-select" id="tc-new-owner-select">
+                                ${membersOptions || '<option value="">无其他成员可选</option>'}
+                            </select>
+                        </div>
+                        <div class="tc-form-hint">更换后，你将成为项目的管理员，新负责人将成为创建者。</div>
+                    </div>
+                    <div class="tc-modal-footer">
+                        <button class="tc-btn tc-btn-secondary" id="tc-cancel-change-owner">取消</button>
+                        <button class="tc-btn tc-btn-primary" id="tc-confirm-change-owner" ${membersOptions ? '' : 'disabled'}>确认更换</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        const modal = document.getElementById('tc-change-owner-modal');
+        const closeBtn = document.getElementById('tc-close-change-owner');
+        const cancelBtn = document.getElementById('tc-cancel-change-owner');
+        const confirmBtn = document.getElementById('tc-confirm-change-owner');
+
+        const closeModal = () => modal.remove();
+        closeBtn.addEventListener('click', closeModal);
+        cancelBtn.addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+        confirmBtn.addEventListener('click', async () => {
+            const newOwnerId = document.getElementById('tc-new-owner-select').value;
+            if (!newOwnerId) {
+                this.api.ui.showToast('请选择新负责人', 'warning');
+                return;
+            }
+            try {
+                await this.projectService.updateProject(this.currentProjectId, { ownerId: newOwnerId }, this.currentUserId);
+                this.api.ui.showToast('项目负责人已更换', 'success');
+                closeModal();
+                await this.refresh();
+            } catch (error) {
+                this.api.ui.showToast('更换负责人失败: ' + error.message, 'error');
+            }
+        });
     }
 
     /**
@@ -10948,6 +11306,7 @@ class ActivityView {
                 userId: data.createdBy,
                 targetType: 'task',
                 targetId: data.taskId,
+                taskTitle: data.taskTitle || '',
                 description: '创建了任务'
             });
         });
@@ -10966,7 +11325,8 @@ class ActivityView {
                 userId: data.userId,
                 targetType: 'task',
                 targetId: data.taskId,
-                description: `将任务状态从 "${statusLabels[data.from] || data.from}" 改为 "${statusLabels[data.to] || data.to}"`
+                taskTitle: data.taskTitle || '',
+                description: `将任务状态从「${statusLabels[data.from] || data.from}」改为「${statusLabels[data.to] || data.to}」`
             });
         });
 
@@ -10978,20 +11338,33 @@ class ActivityView {
                 userId: data.userId,
                 targetType: 'task',
                 targetId: data.taskId,
+                taskTitle: data.taskTitle || '',
                 description: '删除了任务'
             });
         });
 
         // 任务更新（标题/描述/进度/求助等）
         this.eventBus.on(C.EVENTS.TASK_UPDATED, (data) => {
+            let desc = data.description || '修改了任务';
+            if (data.field === 'progress' && data.progressPercent !== undefined) {
+                desc = `更新了任务进度至 ${data.progressPercent}%`;
+            } else if (data.field === 'title') {
+                desc = `修改了任务标题`;
+            } else if (data.field === 'description') {
+                desc = `修改了任务描述`;
+            } else if (data.field === 'helpRequested' && data.helpRequested) {
+                desc = `发起了协作求助`;
+            }
             this.addActivity({
                 type: 'task_updated',
                 projectId: data.projectId,
                 userId: data.userId,
                 targetType: 'task',
                 targetId: data.taskId,
+                taskTitle: data.taskTitle || '',
                 field: data.field,
-                description: data.description || '修改了任务'
+                progressPercent: data.progressPercent,
+                description: desc
             });
         });
 
@@ -11000,22 +11373,24 @@ class ActivityView {
             this.addActivity({
                 type: 'task_assigned',
                 projectId: data.projectId,
-                userId: data.assigneeId,
+                userId: data.assignedBy || data.userId,
                 targetType: 'task',
                 targetId: data.taskId,
-                description: `被指派了任务`
+                assigneeId: data.assigneeId,
+                description: `将任务指派给了 ${data.assigneeId}`
             });
         });
 
         // 评论添加
         this.eventBus.on(C.EVENTS.COMMENT_ADDED, (data) => {
+            const targetTypeLabel = data.targetType === 'plan' ? '学习计划' : '任务';
             this.addActivity({
                 type: 'comment_added',
                 projectId: data.projectId,
                 userId: data.authorId,
                 targetType: data.targetType,
                 targetId: data.targetId,
-                description: '添加了评论'
+                description: `在${targetTypeLabel}中添加了评论`
             });
         });
 
@@ -11027,6 +11402,7 @@ class ActivityView {
                 userId: data.userId,
                 targetType: 'plan',
                 targetId: data.planId,
+                planTitle: data.planTitle || '',
                 description: '提交了学习成果'
             });
         });
@@ -11039,7 +11415,8 @@ class ActivityView {
                 userId: data.requestedBy,
                 targetType: 'task',
                 targetId: data.taskId,
-                description: '发起了求助'
+                taskTitle: data.taskTitle || '',
+                description: '发起了协作求助'
             });
         });
 
@@ -11051,7 +11428,8 @@ class ActivityView {
                 userId: data.helperId,
                 targetType: 'task',
                 targetId: data.taskId,
-                description: '响应了求助'
+                taskTitle: data.taskTitle || '',
+                description: '响应了协作求助'
             });
         });
 
@@ -11063,7 +11441,8 @@ class ActivityView {
                 userId: data.resolvedBy,
                 targetType: 'task',
                 targetId: data.taskId,
-                description: '解决了求助'
+                taskTitle: data.taskTitle || '',
+                description: '解决了协作求助'
             });
         });
 
