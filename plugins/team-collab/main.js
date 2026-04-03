@@ -88,6 +88,8 @@ const NOTIFICATION_TYPE = {
     COMMENT_MENTION: 'comment_mention',
     COMMENT_REPLY: 'comment_reply',
     PLAN_SUBMISSION: 'plan_submission',
+    PLAN_DUE_SOON: 'plan_due_soon',
+    PLAN_OVERDUE: 'plan_overdue',
     PROJECT_INVITED: 'project_invited',
     HELP_REQUESTED: 'help_requested',
     HELP_CLAIMED: 'help_claimed',
@@ -677,16 +679,16 @@ class MarkdownRenderer {
         // 删除线（~~text~~）
         html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
 
-        // 链接（[text](url)）
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
-            const safeUrl = this.sanitizeUrl(url);
-            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
-        });
-
-        // 图片（![alt](url)）
+        // 图片（![alt](url)）- 必须在链接之前处理
         html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, url) => {
             const safeUrl = this.sanitizeUrl(url);
             return `<img src="${safeUrl}" alt="${alt}" style="max-width:100%;">`;
+        });
+
+        // 链接（[text](url)），排除图片语法
+        html = html.replace(/(?<!!)\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+            const safeUrl = this.sanitizeUrl(url);
+            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
         });
 
         // 引用（> text）
@@ -4701,13 +4703,20 @@ class NotificationService {
         const now = Date.now();
         const oneDayMs = 24 * 60 * 60 * 1000;
 
+        // 获取已有通知，避免重复发送
+        const inbox = await this.storage.loadUserInbox(userId);
+
         for (const task of tasks) {
             if (!task.dueDate || task.status === C.TASK_STATUS.DONE) continue;
 
             const timeUntilDue = task.dueDate - now;
 
+            // 检查是否已有相同通知
+            const existingDueSoon = inbox.find(n => n.targetId === task.id && n.type === C.NOTIFICATION_TYPE.TASK_DUE_SOON);
+            const existingOverdue = inbox.find(n => n.targetId === task.id && n.type === C.NOTIFICATION_TYPE.TASK_OVERDUE);
+
             // 即将到期（24小时内）
-            if (timeUntilDue > 0 && timeUntilDue <= oneDayMs) {
+            if (timeUntilDue > 0 && timeUntilDue <= oneDayMs && !existingDueSoon) {
                 await this.createNotification({
                     userId,
                     type: C.NOTIFICATION_TYPE.TASK_DUE_SOON,
@@ -4720,7 +4729,7 @@ class NotificationService {
             }
 
             // 已逾期
-            if (timeUntilDue < 0) {
+            if (timeUntilDue < 0 && !existingOverdue) {
                 await this.createNotification({
                     userId,
                     type: C.NOTIFICATION_TYPE.TASK_OVERDUE,
@@ -4729,6 +4738,63 @@ class NotificationService {
                     projectId: task.projectId,
                     targetType: 'task',
                     targetId: task.id
+                });
+            }
+        }
+    }
+
+    /**
+     * 检查学习计划截止提醒
+     * @param {string} userId - 用户 ID
+     * @param {Array} plans - 学习计划列表
+     */
+    async checkPlanDueReminders(userId, plans) {
+        const C = window.TCConstants;
+        const now = Date.now();
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        const threeDaysMs = 3 * oneDayMs;
+
+        // 获取已有通知，避免重复发送
+        const inbox = await this.storage.loadUserInbox(userId);
+
+        for (const plan of plans) {
+            const dueDate = plan.submissionRule?.dueDate;
+            if (!dueDate) continue;
+
+            const timeUntilDue = dueDate - now;
+            const progress = plan.progress?.[userId];
+            const isCompleted = progress?.status === 'completed' || progress?.status === 'approved';
+            if (isCompleted) continue;
+
+            // 检查是否已有相同通知
+            const existingDueSoon = inbox.find(n => n.targetId === plan.id && n.type === C.NOTIFICATION_TYPE.PLAN_DUE_SOON);
+            const existingOverdue = inbox.find(n => n.targetId === plan.id && n.type === C.NOTIFICATION_TYPE.PLAN_OVERDUE);
+
+            // 即将到期（3天内）
+            if (timeUntilDue > 0 && timeUntilDue <= threeDaysMs && !existingDueSoon) {
+                const title = plan.title ? await this.crypto.decrypt(plan.title) : '学习计划';
+                await this.createNotification({
+                    userId,
+                    type: C.NOTIFICATION_TYPE.PLAN_DUE_SOON,
+                    title: '学习计划即将到期',
+                    content: `学习计划 "${title}" 将在3天内到期`,
+                    projectId: plan.projectId,
+                    targetType: 'plan',
+                    targetId: plan.id
+                });
+            }
+
+            // 已逾期
+            if (timeUntilDue < 0 && !existingOverdue) {
+                const title = plan.title ? await this.crypto.decrypt(plan.title) : '学习计划';
+                await this.createNotification({
+                    userId,
+                    type: C.NOTIFICATION_TYPE.PLAN_OVERDUE,
+                    title: '学习计划已逾期',
+                    content: `学习计划 "${title}" 已逾期，请尽快完成`,
+                    projectId: plan.projectId,
+                    targetType: 'plan',
+                    targetId: plan.id
                 });
             }
         }
@@ -4748,6 +4814,8 @@ class NotificationService {
             [C.NOTIFICATION_TYPE.COMMENT_MENTION]: '@提及',
             [C.NOTIFICATION_TYPE.COMMENT_REPLY]: '评论回复',
             [C.NOTIFICATION_TYPE.PLAN_SUBMISSION]: '成果提交',
+            [C.NOTIFICATION_TYPE.PLAN_DUE_SOON]: '学习计划即将到期',
+            [C.NOTIFICATION_TYPE.PLAN_OVERDUE]: '学习计划已逾期',
             [C.NOTIFICATION_TYPE.PROJECT_INVITED]: '项目邀请',
             [C.NOTIFICATION_TYPE.HELP_REQUESTED]: '协作求助',
             [C.NOTIFICATION_TYPE.HELP_CLAIMED]: '已响应求助',
@@ -4770,6 +4838,8 @@ class NotificationService {
             [C.NOTIFICATION_TYPE.COMMENT_MENTION]: '@',
             [C.NOTIFICATION_TYPE.COMMENT_REPLY]: '💬',
             [C.NOTIFICATION_TYPE.PLAN_SUBMISSION]: '📝',
+            [C.NOTIFICATION_TYPE.PLAN_DUE_SOON]: '⏰',
+            [C.NOTIFICATION_TYPE.PLAN_OVERDUE]: '❗',
             [C.NOTIFICATION_TYPE.PROJECT_INVITED]: '👥',
             [C.NOTIFICATION_TYPE.HELP_REQUESTED]: '🆘',
             [C.NOTIFICATION_TYPE.HELP_CLAIMED]: '🤝',
@@ -6764,6 +6834,10 @@ class TaskList {
     async loadTasks() {
         if (!this.currentProjectId) return;
         this.allTasks = await this.taskService.getProjectTasks(this.currentProjectId, this.currentUserId);
+        // 检查任务到期提醒
+        if (this.currentUserId && this.allTasks.length > 0) {
+            await this.taskService.checkDueReminders(this.currentUserId, this.allTasks);
+        }
         this.applyFilters();
     }
 
@@ -9074,6 +9148,10 @@ class PlanView {
         if (!this.currentProjectId) return;
         try {
             this.plans = await this.planService.getProjectPlans(this.currentProjectId);
+            // 检查学习计划到期提醒
+            if (this.currentUserId && this.plans.length > 0) {
+                await this.planService.checkPlanDueReminders(this.currentUserId, this.plans);
+            }
         } catch (error) {
             console.error('[PlanView] 加载计划失败:', error);
             this.plans = [];
