@@ -6795,12 +6795,13 @@ window.TCTaskBoard = TaskBoard;
  */
 
 class TaskList {
-    constructor(panel, taskService, indexManager, eventBus, projectService) {
+    constructor(panel, taskService, indexManager, eventBus, projectService, notificationService) {
         this.panel = panel;
         this.taskService = taskService;
         this.indexManager = indexManager;
         this.eventBus = eventBus;
         this.projectService = projectService;
+        this.notificationService = notificationService;
         this.currentProjectId = null;
         this.currentUserId = null;
         this.tasks = [];
@@ -6835,8 +6836,8 @@ class TaskList {
         if (!this.currentProjectId) return;
         this.allTasks = await this.taskService.getProjectTasks(this.currentProjectId, this.currentUserId);
         // 检查任务到期提醒
-        if (this.currentUserId && this.allTasks.length > 0) {
-            await this.taskService.checkDueReminders(this.currentUserId, this.allTasks);
+        if (this.currentUserId && this.allTasks.length > 0 && this.notificationService) {
+            await this.notificationService.checkDueReminders(this.currentUserId, this.allTasks);
         }
         this.applyFilters();
     }
@@ -11487,7 +11488,8 @@ window.TCActivityView = ActivityView;
                 this.taskService,
                 this.indexManager,
                 this.eventBus,
-                this.projectService
+                this.projectService,
+                this.notificationService
             );
 
             // 创建任务详情
