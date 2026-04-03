@@ -399,93 +399,8 @@ function formatDateTime(timestamp) {
         day: '2-digit',
         hour: '2-digit',
         minute: '2-digit'
-            });
-        }
-
-        /**
-         * 显示编辑项目对话框
-         */
-        async showEditProjectModal(projectId) {
-            const project = await this.projectService.getProject(projectId);
-            if (!project) {
-                this.panel.api.ui.showToast('项目不存在', 'error');
-                return;
-            }
-
-            const members = project.members || [];
-            const membersOptions = members
-                .filter(m => m.userId !== project.ownerId)
-                .map(m => `<option value="${window.TCUtils.escapeHtml(m.userId)}" ${m.userId === project.ownerId ? 'selected' : ''}>${window.TCUtils.escapeHtml(m.userId)} (${this.getRoleLabelForProject(m.role)})</option>`)
-                .join('');
-
-            const modalHtml = `
-                <div class="tc-modal-overlay" id="tc-edit-project-modal">
-                    <div class="tc-modal">
-                        <div class="tc-modal-header">
-                            <h3>编辑项目 - ${window.TCUtils.escapeHtml(project.name)}</h3>
-                            <button class="tc-modal-close" id="tc-close-edit-project">&times;</button>
-                        </div>
-                        <div class="tc-modal-body">
-                            <div class="tc-form-group">
-                                <label class="tc-form-label">项目名称</label>
-                                <input type="text" class="tc-form-input" id="tc-edit-project-name" value="${window.TCUtils.escapeHtml(project.name)}">
-                            </div>
-                            <div class="tc-form-group">
-                                <label class="tc-form-label">项目描述</label>
-                                <textarea class="tc-form-input tc-form-textarea" id="tc-edit-project-desc" rows="3">${window.TCUtils.escapeHtml(project.description || '')}</textarea>
-                            </div>
-                            <div class="tc-form-group">
-                                <label class="tc-form-label">项目负责人</label>
-                                <select class="tc-form-select" id="tc-edit-project-owner">
-                                    ${members.map(m => `<option value="${window.TCUtils.escapeHtml(m.userId)}" ${m.userId === project.ownerId ? 'selected' : ''}>${window.TCUtils.escapeHtml(m.userId)} (${this.getRoleLabelForProject(m.role)})</option>`).join('')}
-                                </select>
-                            </div>
-                        </div>
-                        <div class="tc-modal-footer">
-                            <button class="tc-btn tc-btn-secondary" id="tc-cancel-edit-project">取消</button>
-                            <button class="tc-btn tc-btn-primary" id="tc-save-edit-project">保存</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-            const modal = document.getElementById('tc-edit-project-modal');
-            const closeModal = () => modal.remove();
-            document.getElementById('tc-close-edit-project').addEventListener('click', closeModal);
-            document.getElementById('tc-cancel-edit-project').addEventListener('click', closeModal);
-            modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
-
-            document.getElementById('tc-save-edit-project').addEventListener('click', async () => {
-                const name = document.getElementById('tc-edit-project-name').value.trim();
-                const description = document.getElementById('tc-edit-project-desc').value.trim();
-                const ownerId = document.getElementById('tc-edit-project-owner').value;
-
-                if (!name) {
-                    this.panel.api.ui.showToast('项目名称不能为空', 'warning');
-                    return;
-                }
-
-                try {
-                    const updates = { name, description };
-                    if (ownerId !== project.ownerId) {
-                        updates.ownerId = ownerId;
-                    }
-                    await this.projectService.updateProject(projectId, updates, this.currentUserId);
-                    this.panel.api.showToast('项目已更新', 'success');
-                    closeModal();
-                    await this.showMyParticipationView();
-                } catch (error) {
-                    this.panel.api.ui.showToast('更新失败: ' + error.message, 'error');
-                }
-            });
-        }
-
-        getRoleLabelForProject(role) {
-            const labels = { 'owner': '创建者', 'admin': '管理员', 'member': '成员', 'guest': '访客' };
-            return labels[role] || '未知';
-        }
+    });
+}
 
 /**
  * 格式化相对时间
@@ -12477,6 +12392,87 @@ window.TCActivityView = ActivityView;
                     }, 100);
                 });
             });
+        }
+
+        /**
+         * 显示编辑项目对话框
+         */
+        async showEditProjectModal(projectId) {
+            const project = await this.projectService.getProject(projectId);
+            if (!project) {
+                this.panel.api.ui.showToast('项目不存在', 'error');
+                return;
+            }
+
+            const members = project.members || [];
+
+            const modalHtml = `
+                <div class="tc-modal-overlay" id="tc-edit-project-modal">
+                    <div class="tc-modal">
+                        <div class="tc-modal-header">
+                            <h3>编辑项目 - ${window.TCUtils.escapeHtml(project.name)}</h3>
+                            <button class="tc-modal-close" id="tc-close-edit-project">&times;</button>
+                        </div>
+                        <div class="tc-modal-body">
+                            <div class="tc-form-group">
+                                <label class="tc-form-label">项目名称</label>
+                                <input type="text" class="tc-form-input" id="tc-edit-project-name" value="${window.TCUtils.escapeHtml(project.name)}">
+                            </div>
+                            <div class="tc-form-group">
+                                <label class="tc-form-label">项目描述</label>
+                                <textarea class="tc-form-input tc-form-textarea" id="tc-edit-project-desc" rows="3">${window.TCUtils.escapeHtml(project.description || '')}</textarea>
+                            </div>
+                            <div class="tc-form-group">
+                                <label class="tc-form-label">项目负责人</label>
+                                <select class="tc-form-select" id="tc-edit-project-owner">
+                                    ${members.map(m => `<option value="${window.TCUtils.escapeHtml(m.userId)}" ${m.userId === project.ownerId ? 'selected' : ''}>${window.TCUtils.escapeHtml(m.userId)} (${this.getRoleLabelForProject(m.role)})</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="tc-modal-footer">
+                            <button class="tc-btn tc-btn-secondary" id="tc-cancel-edit-project">取消</button>
+                            <button class="tc-btn tc-btn-primary" id="tc-save-edit-project">保存</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            const modal = document.getElementById('tc-edit-project-modal');
+            const closeModal = () => modal.remove();
+            document.getElementById('tc-close-edit-project').addEventListener('click', closeModal);
+            document.getElementById('tc-cancel-edit-project').addEventListener('click', closeModal);
+            modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+            document.getElementById('tc-save-edit-project').addEventListener('click', async () => {
+                const name = document.getElementById('tc-edit-project-name').value.trim();
+                const description = document.getElementById('tc-edit-project-desc').value.trim();
+                const ownerId = document.getElementById('tc-edit-project-owner').value;
+
+                if (!name) {
+                    this.panel.api.ui.showToast('项目名称不能为空', 'warning');
+                    return;
+                }
+
+                try {
+                    const updates = { name, description };
+                    if (ownerId !== project.ownerId) {
+                        updates.ownerId = ownerId;
+                    }
+                    await this.projectService.updateProject(projectId, updates, this.currentUserId);
+                    this.panel.api.ui.showToast('项目已更新', 'success');
+                    closeModal();
+                    await this.showMyParticipationView();
+                } catch (error) {
+                    this.panel.api.ui.showToast('更新失败: ' + error.message, 'error');
+                }
+            });
+        }
+
+        getRoleLabelForProject(role) {
+            const labels = { 'owner': '创建者', 'admin': '管理员', 'member': '成员', 'guest': '访客' };
+            return labels[role] || '未知';
         }
 
         /**
