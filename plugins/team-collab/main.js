@@ -560,8 +560,8 @@ window.TCUtils = {
 };
 
 window.TCAttachmentUtils = {
-    MAX_FILE_SIZE: 40 * 1024,
-    MAX_IMAGE_SIZE: 40 * 1024,
+    MAX_FILE_SIZE: 50 * 1024 * 1024,
+    MAX_IMAGE_SIZE: 50 * 1024 * 1024,
     async fileToDataUrl(file) {
         return await new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -570,7 +570,7 @@ window.TCAttachmentUtils = {
             reader.readAsDataURL(file);
         });
     },
-    compressImage(file, maxWidth = 800, quality = 0.7) {
+    compressImage(file, maxWidth = 1200, quality = 0.8) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -595,6 +595,27 @@ window.TCAttachmentUtils = {
             reader.readAsDataURL(file);
         });
     },
+    async uploadFileToDrive(file, ui) {
+        try {
+            const basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
+            const formData = new FormData();
+            formData.append('file', file);
+            const response = await fetch(`${basePath}/api/plugins/upload-file`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                body: formData
+            });
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.message || '上传失败');
+            }
+            return result;
+        } catch (error) {
+            console.error('[TCAttachmentUtils] 文件上传失败:', error);
+            ui?.showToast?.(`上传失败: ${file.name}`, 'error');
+            throw error;
+        }
+    },
     formatFileSize(bytes) {
         if (bytes < 1024) return bytes + ' B';
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -609,28 +630,22 @@ window.TCAttachmentUtils = {
             
             if (file.size > maxSize) {
                 const limit = this.formatFileSize(maxSize);
-                ui?.showToast?.(`文件过大: ${file.name}（${isImage ? '图片' : '文件'}不超过 ${limit}）`, 'warning');
+                ui?.showToast?.(`文件过大: ${file.name}（不超过 ${limit}）`, 'warning');
                 continue;
             }
             
             try {
-                let dataUrl;
-                if (isImage) {
-                    dataUrl = await this.compressImage(file);
-                } else {
-                    dataUrl = await this.fileToDataUrl(file);
-                }
+                const uploadResult = await this.uploadFileToDrive(file, ui);
                 const safeName = (file.name || '附件').replace(/]/g, '\\]').replace(/\n/g, ' ');
                 const fileSize = this.formatFileSize(file.size);
                 
                 if (isImage) {
-                    items.push(`![${safeName}](${dataUrl})`);
+                    items.push(`![${safeName}](drive-image:${uploadResult.drive_item_id})`);
                 } else {
-                    items.push(`[📎 ${safeName} (${fileSize})](${dataUrl})`);
+                    items.push(`[📎 ${safeName} (${fileSize})](drive-file:${uploadResult.drive_item_id})`);
                 }
             } catch (error) {
                 console.error('[TCAttachmentUtils] 文件处理失败:', error);
-                ui?.showToast?.(`文件处理失败: ${file.name}`, 'error');
             }
         }
         return items.join('\n');
@@ -710,16 +725,32 @@ class MarkdownRenderer {
         // 图片（![alt](url)）- 必须在链接之前处理
         html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, url) => {
             const safeUrl = this.sanitizeUrl(url);
+            // 处理网盘图片
+            if (safeUrl.startsWith('drive-image:')) {
+                const fileId = safeUrl.replace('drive-image:', '');
+                const basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
+                const imgUrl = `${basePath}/api/plugins/download-file/${fileId}`;
+                return `<img src="${imgUrl}" alt="${alt}" style="max-width:100%;" class="tc-drive-image" data-file-id="${fileId}">`;
+            }
             return `<img src="${safeUrl}" alt="${alt}" style="max-width:100%;">`;
         });
 
         // 链接（[text](url)），排除图片语法
         html = html.replace(/(?<!!)\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
             const safeUrl = this.sanitizeUrl(url);
+            // 处理网盘文件
+            if (safeUrl.startsWith('drive-file:')) {
+                const fileId = safeUrl.replace('drive-file:', '');
+                const basePath = typeof top_level_path !== 'undefined' ? top_level_path : '';
+                const fileUrl = `${basePath}/api/plugins/download-file/${fileId}`;
+                const fileNameMatch = text.match(/📎\s*(.+?)\s*\(/);
+                const fileName = fileNameMatch ? fileNameMatch[1] : 'download';
+                const safeFileName = fileName.replace(/"/g, '&quot;');
+                return `<a href="${fileUrl}" download="${safeFileName}" class="tc-file-link" data-filename="${safeFileName}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+            }
             // 检测是否为文件类型的 data URI
             const isFileDataUrl = safeUrl.startsWith('data:') && !safeUrl.startsWith('data:image/');
             if (isFileDataUrl) {
-                // 提取文件名和 MIME 类型
                 const mimeMatch = safeUrl.match(/^data:([^;]+);base64,/);
                 const mimeType = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
                 const fileNameMatch = text.match(/📎\s*(.+?)\s*\(/);
@@ -796,6 +827,9 @@ class MarkdownRenderer {
         const trimmed = url.trim().toLowerCase();
         if (trimmed.startsWith('javascript:')) {
             return '#';
+        }
+        if (trimmed.startsWith('drive-image:') || trimmed.startsWith('drive-file:')) {
+            return url;
         }
         const safeDataPrefixes = [
             'data:image/',
