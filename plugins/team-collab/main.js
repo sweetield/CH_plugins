@@ -560,8 +560,8 @@ window.TCUtils = {
 };
 
 window.TCAttachmentUtils = {
-    MAX_FILE_SIZE: 1 * 1024 * 1024, // 限制为 1MB 以确保存储正常
-    MAX_IMAGE_SIZE: 500 * 1024, // 图片限制为 500KB
+    MAX_FILE_SIZE: 3 * 1024 * 1024, // 限制为 3MB 以确保存储正常
+    MAX_IMAGE_SIZE: 3000 * 1024, // 图片限制为 3MB以内
     async fileToDataUrl(file) {
         return await new Promise((resolve, reject) => {
             const reader = new FileReader();
