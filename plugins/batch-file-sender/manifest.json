@@ -1,0 +1,11 @@
+{
+  "id": "batch-file-sender",
+  "name": "批量发文件",
+  "version": "1.0.0",
+  "description": "从总文件夹识别用户子文件夹并批量发送文件，支持全局/单人暂停继续、文件与联系人移除。",
+  "author": "CC 团队",
+  "entry": "main.js",
+  "styles": "styles.css",
+  "permissions": ["ui", "http", "storage", "chat"],
+  "compatibility": ">=4.0.0"
+}
