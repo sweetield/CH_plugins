@@ -531,7 +531,8 @@ class BatchFileSenderPlugin {
     }
 
     async uploadOne(user, fileItem) {
-        const chatApi = window.checkin?.subviews?.chat;
+        const runtimeCheckin = this.getRuntimeCheckin();
+        const chatApi = runtimeCheckin?.subviews?.chat;
         const canUseChatApi = !!(chatApi && chatApi.send_file);
 
         if (canUseChatApi) {
@@ -543,9 +544,14 @@ class BatchFileSenderPlugin {
     }
 
     async uploadViaChatApi(user, fileItem) {
-        const msgType = window.dashboardwrappers?.ChatDashboardWrapper?.message_type?.file ?? 3;
-        const contactType = window.subviews?.Chat?.receiver_type?.user ?? 1;
-        const chatApi = window.checkin.subviews.chat;
+        const runtimeCheckin = this.getRuntimeCheckin();
+        const chatApi = runtimeCheckin?.subviews?.chat;
+        if (!chatApi || !chatApi.send_file) {
+            throw new Error('发送能力不可用：聊天发送接口未就绪');
+        }
+
+        const msgType = this.getMsgTypeFile();
+        const contactType = this.getReceiverTypeUser();
 
         const feedbackargs = {
             contact_type: contactType,
@@ -592,9 +598,9 @@ class BatchFileSenderPlugin {
     }
 
     async uploadViaHttp(user, fileItem) {
-        const encryptors = window.encryptors;
-        if (!encryptors || !encryptors.encrypt || !encryptors.encrypt2base64) {
-            throw new Error('发送能力不可用：缺少加密组件，请刷新页面后重试');
+        const runtimeEncryptors = this.getRuntimeEncryptors();
+        if (!runtimeEncryptors || !runtimeEncryptors.encrypt || !runtimeEncryptors.encrypt2base64) {
+            throw new Error('发送能力不可用：加密组件未就绪，请稍后再试');
         }
 
         const base = typeof top_level_path !== 'undefined' ? top_level_path : '';
@@ -603,7 +609,7 @@ class BatchFileSenderPlugin {
         const msgType = 3;
 
         const buffer = await fileItem.file.arrayBuffer();
-        const encrypted = await encryptors.encrypt(new Uint8Array(buffer));
+        const encrypted = await runtimeEncryptors.encrypt(new Uint8Array(buffer));
 
         const metadata = {
             contact_type: contactType,
@@ -612,7 +618,7 @@ class BatchFileSenderPlugin {
             sender_rand: this.rand(12),
             type: msgType,
             file_attr: {
-                name: await encryptors.encrypt2base64(fileItem.name),
+                name: await runtimeEncryptors.encrypt2base64(fileItem.name),
                 name_encrypted: true,
                 size: fileItem.file.size
             }
@@ -648,6 +654,34 @@ class BatchFileSenderPlugin {
                 xhr.abort();
             }
         });
+    }
+
+    getRuntimeCheckin() {
+        if (typeof checkin !== 'undefined') return checkin;
+        if (typeof window !== 'undefined' && window.checkin) return window.checkin;
+        return null;
+    }
+
+    getRuntimeEncryptors() {
+        if (typeof encryptors !== 'undefined') return encryptors;
+        if (typeof window !== 'undefined' && window.encryptors) return window.encryptors;
+        const runtimeCheckin = this.getRuntimeCheckin();
+        if (runtimeCheckin && runtimeCheckin.encryptors) return runtimeCheckin.encryptors;
+        return null;
+    }
+
+    getMsgTypeFile() {
+        if (typeof dashboardwrappers !== 'undefined' && dashboardwrappers.ChatDashboardWrapper?.message_type?.file !== undefined) {
+            return dashboardwrappers.ChatDashboardWrapper.message_type.file;
+        }
+        return 3;
+    }
+
+    getReceiverTypeUser() {
+        if (typeof subviews !== 'undefined' && subviews.Chat?.receiver_type?.user !== undefined) {
+            return subviews.Chat.receiver_type.user;
+        }
+        return 1;
     }
 
     findUserByFileId(fileId) {
