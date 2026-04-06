@@ -160,13 +160,6 @@ class BatchFileSenderPlugin {
             this.render();
         });
 
-        this.overlay.querySelector('#bfs-refresh-btn').addEventListener('click', async () => {
-            await this.loadContacts();
-            this.users.forEach((user) => this.applyPermission(user));
-            this.render();
-            this.api.ui.showToast('已重新识别联系人权限', 'success');
-        });
-
         this.overlay.querySelector('#bfs-send-all-btn').addEventListener('click', () => {
             this.startAll();
         });
@@ -181,7 +174,7 @@ class BatchFileSenderPlugin {
 
         this.refs.folderInput.addEventListener('change', async (e) => {
             const files = Array.from(e.target.files || []);
-            await this.ingestFiles(files, true);
+            await this.ingestFiles(files, false);
         });
 
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((evt) => {
@@ -208,7 +201,7 @@ class BatchFileSenderPlugin {
         this.refs.panel.addEventListener('drop', async (e) => {
             this.refs.panel.classList.remove('drag-over');
             const dropped = await this.extractDroppedFiles(e.dataTransfer);
-            await this.ingestFiles(dropped, true);
+            await this.ingestFiles(dropped, false);
         });
 
         this.refs.rows.addEventListener('click', (e) => {
@@ -285,7 +278,7 @@ class BatchFileSenderPlugin {
         user.reason = this.contactAny ? '用户不存在或不可联系' : '未添加好友';
     }
 
-    async ingestFiles(inputFiles, replaceAll = true) {
+    async ingestFiles(inputFiles, replaceAll = false) {
         if (!inputFiles || !inputFiles.length) {
             this.api.ui.showToast('未检测到可识别的文件', 'warning');
             return;
@@ -317,8 +310,6 @@ class BatchFileSenderPlugin {
             return;
         }
 
-        this.pauseAll();
-
         const users = Array.from(grouped.entries()).map(([username, files]) => {
             const user = {
                 username,
@@ -337,11 +328,53 @@ class BatchFileSenderPlugin {
             return user;
         }).sort((a, b) => a.username.localeCompare(b.username));
 
-        this.users = replaceAll ? users : [...this.users, ...users];
+        if (replaceAll) {
+            this.pauseAll();
+            this.users = users;
+            this.globalPaused = false;
+            this.render();
+            this.api.ui.showToast(`识别完成：${users.length} 个联系人，${inputFiles.length} 个文件`, 'success');
+            return;
+        }
+
+        const existingByUser = new Map(this.users.map((u) => [u.username, u]));
+        let appendedUsers = 0;
+        let appendedFiles = 0;
+        let skippedFiles = 0;
+
+        for (const incomingUser of users) {
+            const existed = existingByUser.get(incomingUser.username);
+            if (!existed) {
+                this.users.push(incomingUser);
+                appendedUsers += 1;
+                appendedFiles += incomingUser.files.length;
+                continue;
+            }
+
+            const existsSignatures = new Set(
+                existed.files.map((f) => `${f.name}__${f.size}`)
+            );
+
+            for (const file of incomingUser.files) {
+                const signature = `${file.name}__${file.size}`;
+                if (existsSignatures.has(signature)) {
+                    skippedFiles += 1;
+                    continue;
+                }
+                existed.files.push(file);
+                existsSignatures.add(signature);
+                appendedFiles += 1;
+            }
+        }
+
+        this.users.sort((a, b) => a.username.localeCompare(b.username));
         this.globalPaused = false;
         this.render();
 
-        this.api.ui.showToast(`识别完成：${users.length} 个联系人，${inputFiles.length} 个文件`, 'success');
+        this.api.ui.showToast(
+            `已累加：新增${appendedUsers}个联系人，新增${appendedFiles}个文件${skippedFiles ? `，跳过${skippedFiles}个重复文件` : ''}`,
+            'success'
+        );
     }
 
     parseRelativePath(path) {
@@ -911,7 +944,6 @@ class BatchFileSenderPlugin {
                         <input id="bfs-folder-input" type="file" webkitdirectory directory hidden>
                         <button class="bfs-btn" id="bfs-import-btn">导入文件夹</button>
                         <button class="bfs-btn bfs-btn-danger" id="bfs-clear-btn">清空</button>
-                        <button class="bfs-btn" id="bfs-refresh-btn">重新识别</button>
                         <span class="bfs-split"></span>
                         <button class="bfs-btn bfs-btn-pause" id="bfs-pause-all-btn">全部暂停</button>
                         <button class="bfs-btn bfs-btn-resume" id="bfs-resume-all-btn">全部继续</button>
