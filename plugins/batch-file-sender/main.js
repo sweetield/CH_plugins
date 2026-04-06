@@ -264,19 +264,21 @@ class BatchFileSenderPlugin {
         const users = await this.api.http.get(`${base}/me/api/contacts?type=users`);
         const anyResult = await this.api.http.get(`${base}/me/api/contacts?type=any`);
 
-        const list = Array.isArray(users) ? users : [];
+        const list = Array.isArray(users)
+            ? users
+            : (Array.isArray(users?.users) ? users.users : []);
         this.contactSet = new Set(list.map((item) => item.uid));
         this.contactAny = !!(anyResult && anyResult.contact_any);
     }
 
     applyPermission(user) {
-        if (this.contactAny) {
-            user.canSend = true;
+        const valid = !!user.username && this.contactSet.has(user.username);
+        user.canSend = valid;
+        if (valid) {
             user.reason = '';
             return;
         }
-        user.canSend = this.contactSet.has(user.username);
-        user.reason = user.canSend ? '' : '未添加好友';
+        user.reason = this.contactAny ? '用户不存在或不可联系' : '未添加好友';
     }
 
     async ingestFiles(inputFiles, replaceAll = true) {
@@ -343,14 +345,18 @@ class BatchFileSenderPlugin {
         if (parts.length < 2) return null;
 
         if (parts.length >= 3) {
+            const username = (parts[1] || '').trim();
+            if (!username) return null;
             return {
-                username: parts[1],
+                username,
                 displayName: parts.slice(2).join('/')
             };
         }
 
+        const username = (parts[0] || '').trim();
+        if (!username) return null;
         return {
-            username: parts[0],
+            username,
             displayName: parts[1]
         };
     }
@@ -827,7 +833,7 @@ class BatchFileSenderPlugin {
         this.overlay.querySelector('#bfs-stat-active').textContent = `${uploadingUsers}`;
 
         const modeText = this.contactAny
-            ? '当前账号具有 contact_any 权限，可向所有用户发送。'
+            ? '当前账号具有 contact_any 权限，可向可联系用户列表中的账号发送。'
             : '当前账号仅可向已添加好友发送。';
         this.refs.contactMode.textContent = modeText;
     }
