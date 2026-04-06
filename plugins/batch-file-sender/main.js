@@ -532,12 +532,20 @@ class BatchFileSenderPlugin {
 
     async uploadOne(user, fileItem) {
         const chatApi = window.checkin?.subviews?.chat;
-        const msgType = window.dashboardwrappers?.ChatDashboardWrapper?.message_type?.file;
-        const contactType = window.subviews?.Chat?.receiver_type?.user;
+        const canUseChatApi = !!(chatApi && chatApi.send_file);
 
-        if (!chatApi || !chatApi.send_file || msgType === undefined || contactType === undefined) {
-            throw new Error('聊天文件发送能力不可用，请确认在聊天页面使用');
+        if (canUseChatApi) {
+            await this.uploadViaChatApi(user, fileItem);
+            return;
         }
+
+        await this.uploadViaHttp(user, fileItem);
+    }
+
+    async uploadViaChatApi(user, fileItem) {
+        const msgType = window.dashboardwrappers?.ChatDashboardWrapper?.message_type?.file ?? 3;
+        const contactType = window.subviews?.Chat?.receiver_type?.user ?? 1;
+        const chatApi = window.checkin.subviews.chat;
 
         const feedbackargs = {
             contact_type: contactType,
@@ -579,6 +587,65 @@ class BatchFileSenderPlugin {
                 }
             } catch (error) {
                 reject(error);
+            }
+        });
+    }
+
+    async uploadViaHttp(user, fileItem) {
+        const encryptors = window.encryptors;
+        if (!encryptors || !encryptors.encrypt || !encryptors.encrypt2base64) {
+            throw new Error('发送能力不可用：缺少加密组件，请刷新页面后重试');
+        }
+
+        const base = typeof top_level_path !== 'undefined' ? top_level_path : '';
+        const url = `${base}/chat/api/send_file`;
+        const contactType = 1;
+        const msgType = 3;
+
+        const buffer = await fileItem.file.arrayBuffer();
+        const encrypted = await encryptors.encrypt(new Uint8Array(buffer));
+
+        const metadata = {
+            contact_type: contactType,
+            ceid: null,
+            uid: user.username,
+            sender_rand: this.rand(12),
+            type: msgType,
+            file_attr: {
+                name: await encryptors.encrypt2base64(fileItem.name),
+                name_encrypted: true,
+                size: fileItem.file.size
+            }
+        };
+
+        const blob = new Blob([encrypted], { type: 'application/octet-stream' });
+        const formData = new FormData();
+        formData.append('file', blob, 'filename');
+        formData.append('metadata', JSON.stringify(metadata));
+
+        await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', url, true);
+            xhr.upload.onprogress = (evt) => {
+                if (!evt || !evt.total) return;
+                fileItem.progress = Math.min(100, Math.round((evt.loaded / evt.total) * 100));
+                this.renderProgressOnly();
+            };
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    resolve();
+                } else {
+                    reject(new Error(`上传失败(${xhr.status})`));
+                }
+            };
+            xhr.onerror = () => reject(new Error('上传网络异常'));
+            xhr.onabort = () => reject({ __aborted: true });
+
+            user.xhr = xhr;
+            xhr.send(formData);
+
+            if (this.globalPaused || user.paused || user.pauseRequested) {
+                xhr.abort();
             }
         });
     }
