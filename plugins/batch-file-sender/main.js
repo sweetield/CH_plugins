@@ -716,16 +716,18 @@ class BatchFileSenderPlugin {
         if (!user.canSend) {
             return { label: '发送', className: 'task-btn send', disabled: true };
         }
+        const hasPending = user.files.some((f) => f.status !== 'done');
+        if (!hasPending) {
+            return { label: '完成', className: 'task-btn done', disabled: true };
+        }
         if (user.state === 'uploading') {
             return { label: '暂停', className: 'task-btn pause', disabled: false };
         }
         if (user.state === 'paused' || user.started) {
-            const hasPending = user.files.some((f) => f.status !== 'done');
             if (hasPending) {
                 return { label: '继续', className: 'task-btn resume', disabled: false };
             }
         }
-        const hasPending = user.files.some((f) => f.status !== 'done');
         return { label: '发送', className: 'task-btn send', disabled: !hasPending };
     }
 
@@ -744,13 +746,14 @@ class BatchFileSenderPlugin {
                             </span>
                         </div>
                         <div class="bfs-file-meta">${this.formatSize(file.size)} · ${this.statusText(file.status)}</div>
-                        <div class="bfs-mini-progress"><div class="bfs-mini-fill" style="width:${file.progress || 0}%"></div></div>
+                        <div class="bfs-mini-progress"><div class="bfs-mini-fill ${file.status === 'done' ? 'is-done' : 'is-active'}" style="width:${file.progress || 0}%"></div></div>
                     </div>
                 `).join('')
                 : '<div class="bfs-empty">该联系人已无待发送文件</div>';
 
             const tagClass = user.canSend ? 'bfs-tag bfs-tag-ok' : 'bfs-tag bfs-tag-err';
             const tagText = user.canSend ? '可发送' : (user.reason || '不可发送');
+            const overallClass = user.files.length && user.files.every((f) => f.status === 'done') ? 'is-done' : 'is-active';
 
             return `
                 <article class="bfs-user-card" data-username="${this.escapeHtml(user.username)}">
@@ -766,7 +769,7 @@ class BatchFileSenderPlugin {
                             <div class="bfs-cell-label">文件列表与发送进度</div>
                             <div class="bfs-overall">
                                 <div class="bfs-overall-row"><span>总进度</span><span>${progress}%</span></div>
-                                <div class="bfs-progress"><div class="bfs-progress-fill" style="width:${progress}%"></div></div>
+                                <div class="bfs-progress"><div class="bfs-progress-fill ${overallClass}" style="width:${progress}%"></div></div>
                             </div>
                             <div class="bfs-file-list">${filesHtml}</div>
                         </div>
@@ -878,7 +881,6 @@ class BatchFileSenderPlugin {
                 <div class="bfs-panel-drop-mask">释放后开始识别</div>
                 <header class="bfs-head">
                     <div class="bfs-head-left">
-                        <button class="bfs-close-icon" id="bfs-close-icon" title="关闭窗口">x</button>
                         <div>
                             <div class="bfs-title">批量发送文件</div>
                             <div class="bfs-desc">选择总文件夹后自动识别用户名子文件夹，按用户批量发送文件。</div>
@@ -887,13 +889,14 @@ class BatchFileSenderPlugin {
                     <div class="bfs-actions">
                         <input id="bfs-folder-input" type="file" webkitdirectory directory hidden>
                         <button class="bfs-btn" id="bfs-import-btn">导入文件夹</button>
-                        <button class="bfs-btn" id="bfs-clear-btn">清空</button>
+                        <button class="bfs-btn bfs-btn-danger" id="bfs-clear-btn">清空</button>
                         <button class="bfs-btn" id="bfs-refresh-btn">重新识别</button>
                         <span class="bfs-split"></span>
                         <button class="bfs-btn bfs-btn-pause" id="bfs-pause-all-btn">全部暂停</button>
                         <button class="bfs-btn bfs-btn-resume" id="bfs-resume-all-btn">全部继续</button>
                         <button class="bfs-btn bfs-btn-primary" id="bfs-send-all-btn">全部发送</button>
                     </div>
+                    <button class="bfs-close-icon" id="bfs-close-icon" title="关闭窗口">x</button>
                 </header>
 
                 <div class="bfs-drop-zone">
