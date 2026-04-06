@@ -395,6 +395,14 @@
     transition: width 0.2s ease;
 }
 
+.bfs-progress-fill.is-uploading {
+    background: linear-gradient(90deg, #1f7fd4, #54b0f2);
+}
+
+.bfs-progress-fill.is-paused {
+    background: linear-gradient(90deg, #cb5a5a, #ef8c8c);
+}
+
 .bfs-progress-fill.is-done {
     background: linear-gradient(90deg, #249b5b, #55c686);
 }
@@ -508,6 +516,14 @@
     width: 0;
     background: #d96a6a;
     transition: width 0.2s ease;
+}
+
+.bfs-mini-fill.is-uploading {
+    background: #2f93e6;
+}
+
+.bfs-mini-fill.is-paused {
+    background: #d96a6a;
 }
 
 .bfs-mini-fill.is-done {
