@@ -746,14 +746,14 @@ class BatchFileSenderPlugin {
                             </span>
                         </div>
                         <div class="bfs-file-meta">${this.formatSize(file.size)} · ${this.statusText(file.status)}</div>
-                        <div class="bfs-mini-progress"><div class="bfs-mini-fill ${file.status === 'done' ? 'is-done' : 'is-active'}" style="width:${file.progress || 0}%"></div></div>
+                        <div class="bfs-mini-progress"><div class="bfs-mini-fill ${this.fileProgressClass(file)}" style="width:${file.progress || 0}%"></div></div>
                     </div>
                 `).join('')
                 : '<div class="bfs-empty">该联系人已无待发送文件</div>';
 
             const tagClass = user.canSend ? 'bfs-tag bfs-tag-ok' : 'bfs-tag bfs-tag-err';
             const tagText = user.canSend ? '可发送' : (user.reason || '不可发送');
-            const overallClass = user.files.length && user.files.every((f) => f.status === 'done') ? 'is-done' : 'is-active';
+            const overallClass = this.userProgressClass(user);
 
             return `
                 <article class="bfs-user-card" data-username="${this.escapeHtml(user.username)}">
@@ -791,6 +791,19 @@ class BatchFileSenderPlugin {
         return '待发送';
     }
 
+    fileProgressClass(file) {
+        if (file.status === 'done') return 'is-done';
+        if (file.status === 'uploading') return 'is-uploading';
+        return 'is-paused';
+    }
+
+    userProgressClass(user) {
+        const allDone = user.files.length > 0 && user.files.every((f) => f.status === 'done');
+        if (allDone) return 'is-done';
+        if (user.state === 'uploading') return 'is-uploading';
+        return 'is-paused';
+    }
+
     userStateText(user) {
         if (!user.canSend) return '不可发送';
         if (user.state === 'uploading') return '发送中';
@@ -809,7 +822,11 @@ class BatchFileSenderPlugin {
             const overallFill = card.querySelector('.bfs-progress-fill');
             const progress = this.computeUserProgress(user);
             if (overall) overall.textContent = `${progress}%`;
-            if (overallFill) overallFill.style.width = `${progress}%`;
+            if (overallFill) {
+                overallFill.style.width = `${progress}%`;
+                overallFill.classList.remove('is-uploading', 'is-paused', 'is-done');
+                overallFill.classList.add(this.userProgressClass(user));
+            }
 
             user.files.forEach((file) => {
                 const fileRow = card.querySelector(`[data-file-id="${file.id}"]`);
@@ -817,7 +834,11 @@ class BatchFileSenderPlugin {
                 const percent = fileRow.querySelector('.bfs-file-percent');
                 const miniFill = fileRow.querySelector('.bfs-mini-fill');
                 if (percent) percent.textContent = `${file.progress || 0}%`;
-                if (miniFill) miniFill.style.width = `${file.progress || 0}%`;
+                if (miniFill) {
+                    miniFill.style.width = `${file.progress || 0}%`;
+                    miniFill.classList.remove('is-uploading', 'is-paused', 'is-done');
+                    miniFill.classList.add(this.fileProgressClass(file));
+                }
             });
         });
         this.renderSummary();
