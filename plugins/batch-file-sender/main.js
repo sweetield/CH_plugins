@@ -142,6 +142,10 @@ class BatchFileSenderPlugin {
             this.closePanel();
         });
 
+        this.overlay.querySelector('#bfs-close-icon').addEventListener('click', () => {
+            this.closePanel();
+        });
+
         this.overlay.querySelector('#bfs-import-btn').addEventListener('click', () => {
             this.refs.folderInput.value = '';
             this.refs.folderInput.click();
@@ -873,9 +877,12 @@ class BatchFileSenderPlugin {
             <section class="bfs-panel">
                 <div class="bfs-panel-drop-mask">释放后开始识别</div>
                 <header class="bfs-head">
-                    <div>
-                        <div class="bfs-title">批量发送文件</div>
-                        <div class="bfs-desc">选择总文件夹后自动识别用户名子文件夹，按用户批量发送文件。</div>
+                    <div class="bfs-head-left">
+                        <button class="bfs-close-icon" id="bfs-close-icon" title="关闭窗口">x</button>
+                        <div>
+                            <div class="bfs-title">批量发送文件</div>
+                            <div class="bfs-desc">选择总文件夹后自动识别用户名子文件夹，按用户批量发送文件。</div>
+                        </div>
                     </div>
                     <div class="bfs-actions">
                         <input id="bfs-folder-input" type="file" webkitdirectory directory hidden>
@@ -883,8 +890,8 @@ class BatchFileSenderPlugin {
                         <button class="bfs-btn" id="bfs-clear-btn">清空</button>
                         <button class="bfs-btn" id="bfs-refresh-btn">重新识别</button>
                         <span class="bfs-split"></span>
-                        <button class="bfs-btn" id="bfs-pause-all-btn">全部暂停</button>
-                        <button class="bfs-btn" id="bfs-resume-all-btn">全部继续</button>
+                        <button class="bfs-btn bfs-btn-pause" id="bfs-pause-all-btn">全部暂停</button>
+                        <button class="bfs-btn bfs-btn-resume" id="bfs-resume-all-btn">全部继续</button>
                         <button class="bfs-btn bfs-btn-primary" id="bfs-send-all-btn">全部发送</button>
                     </div>
                 </header>
