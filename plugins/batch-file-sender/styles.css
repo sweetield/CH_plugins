@@ -85,6 +85,33 @@
     background: #fbfdff;
 }
 
+.bfs-head-left {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.bfs-close-icon {
+    width: 24px;
+    height: 24px;
+    border: 1px solid #e8bdbd;
+    border-radius: 999px;
+    background: #fff4f4;
+    color: #c33f3f;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+}
+
+.bfs-close-icon:hover {
+    background: #ffe9e9;
+    border-color: #e2a9a9;
+}
+
 .bfs-title {
     font-size: 16px;
     font-weight: 700;
@@ -129,9 +156,43 @@
     background: #096fbe;
 }
 
+.bfs-btn-pause {
+    background: #fff1f1;
+    border-color: #efb8b8;
+    color: #bf3b3b;
+}
+
+.bfs-btn-pause:hover {
+    background: #ffe8e8;
+    border-color: #e49a9a;
+}
+
+.bfs-btn-resume {
+    background: #eefdf3;
+    border-color: #b7e6c8;
+    color: #1f8d53;
+}
+
+.bfs-btn-resume:hover {
+    background: #e6f9ed;
+    border-color: #99d9b3;
+}
+
 .bfs-btn[disabled] {
     opacity: 0.45;
     cursor: not-allowed;
+}
+
+.bfs-btn.task-btn.pause {
+    background: #fff1f1;
+    border-color: #efb8b8;
+    color: #bf3b3b;
+}
+
+.bfs-btn.task-btn.resume {
+    background: #eefdf3;
+    border-color: #b7e6c8;
+    color: #1f8d53;
 }
 
 .bfs-split {
@@ -459,6 +520,10 @@
     border-color: #2f4054;
 }
 
+.theme-dark .bfs-rows {
+    background: #162131;
+}
+
 .theme-dark .bfs-title,
 .theme-dark .bfs-file-name,
 .theme-dark .bfs-uid,
@@ -488,6 +553,26 @@
     background: #263448;
     color: #d7e3f0;
     border-color: #39506a;
+}
+
+.theme-dark .bfs-btn-pause,
+.theme-dark .bfs-btn.task-btn.pause {
+    background: #472626;
+    border-color: #6a3a3a;
+    color: #f2b8b8;
+}
+
+.theme-dark .bfs-btn-resume,
+.theme-dark .bfs-btn.task-btn.resume {
+    background: #1f3f2c;
+    border-color: #2f6445;
+    color: #bde8cc;
+}
+
+.theme-dark .bfs-close-icon {
+    background: #472626;
+    border-color: #6a3a3a;
+    color: #f2b8b8;
 }
 
 .theme-dark .bfs-btn-primary {
