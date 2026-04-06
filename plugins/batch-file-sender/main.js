@@ -558,7 +558,7 @@ class BatchFileSenderPlugin {
             ceid: null,
             xxid: user.username,
             msg: {
-                sender_rand: this.rand(12),
+                sender_rand: this.rand(10),
                 type: msgType,
                 file: fileItem.file,
                 file_name: fileItem.name
@@ -615,7 +615,7 @@ class BatchFileSenderPlugin {
             contact_type: contactType,
             ceid: null,
             uid: user.username,
-            sender_rand: this.rand(12),
+            sender_rand: this.rand(10),
             type: msgType,
             file_attr: {
                 name: await runtimeEncryptors.encrypt2base64(fileItem.name),
