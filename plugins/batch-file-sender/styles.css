@@ -36,7 +36,7 @@
 .bfs-panel {
     position: relative;
     width: min(1180px, 96vw);
-    min-width: 980px;
+    min-width: 0;
     height: min(900px, 90vh);
     max-height: 90vh;
     overflow: auto;
@@ -675,6 +675,39 @@
 }
 
 @media (max-width: 980px) {
+    .bfs-overlay {
+        padding: 10px;
+    }
+
+    .bfs-panel {
+        width: 100%;
+        height: 94vh;
+        max-height: 94vh;
+    }
+
+    .bfs-head {
+        padding: 12px 42px 10px 12px;
+    }
+
+    .bfs-head-left,
+    .bfs-actions {
+        width: 100%;
+    }
+
+    .bfs-actions {
+        gap: 6px;
+    }
+
+    .bfs-actions .bfs-btn {
+        flex: 1 1 calc(33.333% - 6px);
+        min-width: 96px;
+        text-align: center;
+    }
+
+    .bfs-split {
+        display: none;
+    }
+
     .bfs-summary {
         grid-template-columns: repeat(3, minmax(110px, 1fr));
     }
@@ -685,5 +718,78 @@
 
     .bfs-user-row {
         grid-template-columns: 1fr;
+    }
+
+    .bfs-rows {
+        padding: 8px 10px;
+    }
+}
+
+@media (max-width: 720px) {
+    .bfs-title {
+        font-size: 15px;
+    }
+
+    .bfs-desc,
+    .bfs-drop-zone {
+        font-size: 11px;
+    }
+
+    .bfs-actions .bfs-btn {
+        flex: 1 1 calc(50% - 6px);
+        min-width: 0;
+        padding: 7px 8px;
+    }
+
+    .bfs-summary {
+        grid-template-columns: repeat(2, minmax(100px, 1fr));
+        gap: 6px;
+        padding: 8px 10px;
+    }
+
+    .bfs-stat {
+        padding: 7px;
+    }
+
+    .bfs-stat-value {
+        font-size: 15px;
+    }
+
+    .bfs-cell {
+        padding: 7px;
+    }
+
+    .bfs-file-name {
+        max-width: 170px;
+    }
+
+    .bfs-foot {
+        padding: 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .bfs-overlay {
+        padding: 6px;
+    }
+
+    .bfs-panel {
+        border-radius: 10px;
+    }
+
+    .bfs-head {
+        padding: 10px 40px 8px 10px;
+    }
+
+    .bfs-actions .bfs-btn {
+        flex: 1 1 100%;
+    }
+
+    .bfs-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .bfs-file-name {
+        max-width: 120px;
     }
 }
